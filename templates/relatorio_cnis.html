@@ -1396,6 +1396,46 @@ body {
         </tbody>
       </table>
       {% endif %}
+      {% if item.tabela_moeda %}
+      <table class="conclusao-tabela-lacunas">
+        <thead>
+          <tr>
+            <th>Empregador</th>
+            <th>Período</th>
+            <th>Qtd. Competências</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for ma in item.tabela_moeda %}
+          <tr>
+            <td>{{ ma.empregador }}</td>
+            <td>{{ ma.periodo }}</td>
+            <td>{{ ma.qtd }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+      {% if item.tabela_indpend %}
+      <table class="conclusao-tabela-lacunas">
+        <thead>
+          <tr>
+            <th>Empregador</th>
+            <th>Competência</th>
+            <th>Indicador</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for ind in item.tabela_indpend %}
+          <tr>
+            <td>{{ ind.empregador }}</td>
+            <td>{{ ind.competencia }}</td>
+            <td>{{ ind.indicador }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
       <p class="conclusao-paragrafo conclusao-impacto">{{ item.impacto }}</p>
     </div>
     {% endfor %}

@@ -754,7 +754,7 @@ def gerar_conclusao(cabecalho, qualidade, indicadores_info, lacunas_info,
             ),
         })
 
-    # 7. REMUNERAÇÕES EM MOEDA ANTIGA — listar empregadores e períodos
+    # 7. REMUNERAÇÕES EM MOEDA ANTIGA — tabela por empregador
     moeda_antiga = remuneracoes_info.get('moeda_antiga', [])
     if moeda_antiga:
         # Agrupar por empregador
@@ -762,64 +762,69 @@ def gerar_conclusao(cabecalho, qualidade, indicadores_info, lacunas_info,
         for item in moeda_antiga:
             emp = item.get('empregador', 'N/I')
             if emp not in por_emp_ma:
-                por_emp_ma[emp] = []
-            por_emp_ma[emp].append(item['competencia'])
+                por_emp_ma[emp] = {'competencias': [], 'seq': item.get('vinculo_seq', '')}
+            por_emp_ma[emp]['competencias'].append(item['competencia'])
 
-        detalhes_ma = []
-        for emp, comps in por_emp_ma.items():
-            comps_str = f'{comps[0]} a {comps[-1]}' if len(comps) > 2 else ', '.join(comps)
-            detalhes_ma.append(f'{emp}: {len(comps)} competência(s) ({comps_str})')
+        tabela_moeda = []
+        for emp, dados in por_emp_ma.items():
+            comps = dados['competencias']
+            periodo = f'{comps[0]} a {comps[-1]}' if len(comps) > 1 else comps[0]
+            tabela_moeda.append({
+                'empregador': emp,
+                'periodo': periodo,
+                'qtd': len(comps),
+            })
 
-        lista_ma = '; '.join(detalhes_ma)
         problemas.append({
             'problema': (
                 f'O extrato contém {len(moeda_antiga)} remuneração(ões) registrada(s) em '
-                f'moeda antiga (Cruzeiro, Cruzado, etc.). Detalhamento: {lista_ma}.'
+                'moeda antiga (Cruzeiro, Cruzado, etc.).'
             ),
             'impacto': (
                 'Se a conversão para o Real não estiver correta, o valor do salário de '
                 'contribuição será calculado abaixo do real, resultando em uma aposentadoria '
                 'com valor menor do que o(a) segurado(a) teria direito.'
             ),
+            'tabela_moeda': tabela_moeda,
         })
 
-    # 8. INDICADORES PENDENTES — detalhar quais indicadores e onde aparecem
+    # 8. INDICADORES PENDENTES — tabela detalhada
     alertas_indpend = [a for a in indicadores_info.get('alertas', [])
                        if a['codigo'] in ('IREC-INDPEND', 'IREM-INDPEND')]
     if alertas_indpend:
-        # Encontrar exatamente onde esses indicadores aparecem
-        detalhes_indpend = []
+        tabela_indpend = []
         for v in vinculos:
+            # Indicadores no vínculo inteiro
+            inds_v = set(v.get('indicadores_vinculo', []))
+            encontrados_v = inds_v & {'IREC-INDPEND', 'IREM-INDPEND'}
+            if encontrados_v:
+                tabela_indpend.append({
+                    'empregador': v.get('empregador', 'N/I'),
+                    'competencia': 'Vínculo inteiro',
+                    'indicador': ', '.join(encontrados_v),
+                })
+            # Indicadores por remuneração
             for rem in v.get('remuneracoes', []):
                 inds_rem = set(rem.get('indicadores', []))
                 encontrados = inds_rem & {'IREC-INDPEND', 'IREM-INDPEND'}
                 if encontrados:
-                    detalhes_indpend.append(
-                        f'{v.get("empregador", "N/I")} — competência {rem.get("competencia", "N/I")} '
-                        f'(indicador: {", ".join(encontrados)})'
-                    )
-            inds_v = set(v.get('indicadores_vinculo', []))
-            encontrados_v = inds_v & {'IREC-INDPEND', 'IREM-INDPEND'}
-            if encontrados_v:
-                detalhes_indpend.append(
-                    f'{v.get("empregador", "N/I")} — vínculo inteiro '
-                    f'(indicador: {", ".join(encontrados_v)})'
-                )
-
-        lista_indpend = '; '.join(detalhes_indpend[:10]) if detalhes_indpend else 'registros não identificados'
-        if len(detalhes_indpend) > 10:
-            lista_indpend += f' e mais {len(detalhes_indpend) - 10} registro(s)'
+                    tabela_indpend.append({
+                        'empregador': v.get('empregador', 'N/I'),
+                        'competencia': rem.get('competencia', 'N/I'),
+                        'indicador': ', '.join(encontrados),
+                    })
 
         problemas.append({
             'problema': (
-                f'Foram identificados recolhimentos/remunerações com indicadores pendentes '
-                f'que sinalizam problemas nos registros: {lista_indpend}.'
+                f'Foram identificados {len(tabela_indpend)} registro(s) com indicadores '
+                'pendentes que sinalizam problemas.'
             ),
             'impacto': (
                 'As contribuições afetadas podem não ser consideradas pelo INSS no cálculo '
                 'do tempo de contribuição e do valor do benefício até que sejam resolvidos. '
                 'Isso pode atrasar a aposentadoria ou reduzir seu valor.'
             ),
+            'tabela_indpend': tabela_indpend,
         })
 
     # MONTAR RESULTADO
