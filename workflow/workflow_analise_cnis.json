@@ -1,0 +1,369 @@
+{
+  "name": "Análise Automática de CNIS",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute",
+              "value": 5
+            }
+          ]
+        },
+        "triggerOn": "specificFolder",
+        "folderToWatch": "={{ $env.GOOGLE_DRIVE_FOLDER_CNIS }}",
+        "event": "fileCreated",
+        "options": {}
+      },
+      "id": "trigger-google-drive",
+      "name": "Trigger - Novo CNIS no Drive",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [260, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "GOOGLE_DRIVE_CREDENTIAL_ID",
+          "name": "Google Drive - Tatiana Sampaio"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.id }}"
+        },
+        "options": {}
+      },
+      "id": "download-pdf",
+      "name": "Download PDF do CNIS",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [480, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "GOOGLE_DRIVE_CREDENTIAL_ID",
+          "name": "Google Drive - Tatiana Sampaio"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.API_CNIS_URL }}/analisar-cnis",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.API_CNIS_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "fullResponse": false
+        }
+      },
+      "id": "chamar-api-cnis",
+      "name": "API - Analisar CNIS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-sucesso",
+              "leftValue": "={{ $json.sucesso }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "verificar-sucesso",
+      "name": "Sucesso?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Preparar PDF e DOCX como binary para upload no Google Drive\nconst data = $input.first().json;\nconst base64Pdf = data.relatorio_pdf_base64;\nconst base64Docx = data.relatorio_docx_base64;\nconst nomeArquivoPdf = data.nome_arquivo_pdf;\nconst nomeArquivoDocx = data.nome_arquivo_docx;\n\nconst result = {\n  json: {\n    nome_arquivo_pdf: nomeArquivoPdf,\n    nome_arquivo_docx: nomeArquivoDocx,\n    resumo: data.resumo,\n  },\n  binary: {},\n};\n\n// PDF\nif (base64Pdf) {\n  result.binary.pdf = {\n    data: base64Pdf,\n    mimeType: 'application/pdf',\n    fileName: nomeArquivoPdf,\n  };\n}\n\n// DOCX\nif (base64Docx) {\n  result.binary.docx = {\n    data: base64Docx,\n    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',\n    fileName: nomeArquivoDocx,\n  };\n}\n\nreturn [result];"
+      },
+      "id": "preparar-arquivos",
+      "name": "Preparar PDF + DOCX para Upload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, 200]
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "name": "={{ $json.nome_arquivo_pdf }}",
+        "folderId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.GOOGLE_DRIVE_FOLDER_RELATORIOS }}"
+        },
+        "inputDataFieldName": "pdf",
+        "options": {}
+      },
+      "id": "upload-pdf",
+      "name": "Upload PDF no Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1360, 140],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "GOOGLE_DRIVE_CREDENTIAL_ID",
+          "name": "Google Drive - Tatiana Sampaio"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "name": "={{ $('Preparar PDF + DOCX para Upload').item.json.nome_arquivo_docx }}",
+        "folderId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.GOOGLE_DRIVE_FOLDER_RELATORIOS }}"
+        },
+        "inputDataFieldName": "docx",
+        "options": {}
+      },
+      "id": "upload-docx",
+      "name": "Upload DOCX no Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1360, 280],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "GOOGLE_DRIVE_CREDENTIAL_ID",
+          "name": "Google Drive - Tatiana Sampaio"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/{{ $env.WHATSAPP_PHONE_NUMBER_ID }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.WHATSAPP_ACCESS_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"552799185544\",\n  \"type\": \"template\",\n  \"template\": {\n    \"name\": \"analise_cnis_concluida\",\n    \"language\": { \"code\": \"pt_BR\" },\n    \"components\": [\n      {\n        \"type\": \"body\",\n        \"parameters\": [\n          { \"type\": \"text\", \"text\": \"{{ $('Preparar PDF + DOCX para Upload').item.json.resumo.nome }}\" },\n          { \"type\": \"text\", \"text\": \"{{ $('Preparar PDF + DOCX para Upload').item.json.resumo.total_pendencias }}\" },\n          { \"type\": \"text\", \"text\": \"{{ $('Preparar PDF + DOCX para Upload').item.json.resumo.total_alertas }}\" }\n        ]\n      }\n    ]\n  }\n}",
+        "options": {}
+      },
+      "id": "whatsapp-sucesso",
+      "name": "WhatsApp - Análise Concluída",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1580, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/{{ $env.WHATSAPP_PHONE_NUMBER_ID }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.WHATSAPP_ACCESS_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"552799185544\",\n  \"type\": \"template\",\n  \"template\": {\n    \"name\": \"analise_cnis_falha\",\n    \"language\": { \"code\": \"pt_BR\" },\n    \"components\": [\n      {\n        \"type\": \"body\",\n        \"parameters\": [\n          { \"type\": \"text\", \"text\": \"{{ $('Trigger - Novo CNIS no Drive').item.json.name }}\" },\n          { \"type\": \"text\", \"text\": \"{{ $('API - Analisar CNIS').item.json.erro || 'Erro desconhecido' }}\" }\n        ]\n      }\n    ]\n  }\n}",
+        "options": {}
+      },
+      "id": "whatsapp-falha",
+      "name": "WhatsApp - Falha na Análise",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1360, 450]
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Trigger - Novo CNIS no Drive').item.json.id }}"
+        },
+        "driveId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.GOOGLE_DRIVE_FOLDER_MANUAL }}"
+        },
+        "options": {}
+      },
+      "id": "mover-para-manual",
+      "name": "Mover para Análise Manual",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1140, 450],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "GOOGLE_DRIVE_CREDENTIAL_ID",
+          "name": "Google Drive - Tatiana Sampaio"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Trigger - Novo CNIS no Drive": {
+      "main": [
+        [
+          {
+            "node": "Download PDF do CNIS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download PDF do CNIS": {
+      "main": [
+        [
+          {
+            "node": "API - Analisar CNIS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API - Analisar CNIS": {
+      "main": [
+        [
+          {
+            "node": "Sucesso?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sucesso?": {
+      "main": [
+        [
+          {
+            "node": "Preparar PDF + DOCX para Upload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mover para Análise Manual",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar PDF + DOCX para Upload": {
+      "main": [
+        [
+          {
+            "node": "Upload PDF no Drive",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Upload DOCX no Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload PDF no Drive": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp - Análise Concluída",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mover para Análise Manual": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp - Falha na Análise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "CNIS",
+      "id": "cnis-tag"
+    },
+    {
+      "name": "Automação",
+      "id": "automacao-tag"
+    }
+  ],
+  "pinData": {},
+  "versionId": "1"
+}
