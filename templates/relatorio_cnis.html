@@ -1330,50 +1330,17 @@ body {
   <div class="conclusao-barra-topo"></div>
   <div class="conclusao-titulo">Conclusão</div>
   <div class="conclusao-conteudo">
-    <p class="conclusao-paragrafo">
-      Diante da análise realizada, conclui-se que o(a) Sr(a). <strong>{{ cabecalho.nome or 'N/I' }}</strong>
-      {% if qualidade_segurado.status == 'MANTIDA' %}
-      <strong>possui qualidade de segurado(a)</strong>, com período de graça até {{ qualidade_segurado.data_perda_estimada }}.
-      {% elif qualidade_segurado.status == 'PERDIDA' %}
-      <strong>perdeu a qualidade de segurado(a)</strong> (desde aproximadamente {{ qualidade_segurado.data_perda_estimada }}).
-      {% else %}
-      tem situação <strong>indeterminada</strong> quanto à qualidade de segurado.
-      {% endif %}
-    </p>
-
-    {% if qualidade_segurado.status == 'PERDIDA' %}
-    <p class="conclusao-paragrafo">
-      Para recuperar a qualidade de segurado(a), precisará de <strong>6 contribuições válidas consecutivas</strong> (50% da carência de 12 meses para auxílio por incapacidade).
-    </p>
+    {% if conclusao and conclusao.paragrafos_problemas %}
+    {% for paragrafo in conclusao.paragrafos_problemas %}
+    <p class="conclusao-paragrafo">{{ paragrafo }}</p>
+    {% endfor %}
     {% endif %}
 
-    {% if indicadores.total_pendencias > 0 %}
-    <p class="conclusao-paragrafo">
-      Verificou-se <strong>{{ indicadores.total_pendencias }} pendência(s)</strong> que podem impactar o valor e a data de concessão do benefício no futuro. Recomenda-se a regularização junto ao INSS com a documentação apropriada.
-    </p>
-    {% else %}
-    <p class="conclusao-paragrafo">
-      O extrato não apresentou indicadores de pendência formal nas colunas de indicadores. Recomenda-se, contudo, a verificação do Extrato Analítico completo pelo portal Meu INSS.
-    </p>
+    {% if conclusao and conclusao.paragrafos_fixos %}
+    {% for paragrafo in conclusao.paragrafos_fixos %}
+    <p class="conclusao-paragrafo">{{ paragrafo }}</p>
+    {% endfor %}
     {% endif %}
-
-    {% if lacunas.total > 0 %}
-    <p class="conclusao-paragrafo">
-      Foram identificadas <strong>{{ lacunas.total }} lacuna(s) contributiva(s)</strong>, sendo a maior de {{ lacunas.maior_lacuna_meses }} meses, que pode impactar a contagem de carência.
-    </p>
-    {% endif %}
-
-    <p class="conclusao-paragrafo">
-      Ressaltamos que todas as conclusões aqui apresentadas estão fundamentadas na legislação previdenciária vigente, podendo sofrer alterações caso o INSS ou o legislador promovam mudanças nas regras atualmente aplicáveis.
-    </p>
-
-    <p class="conclusao-paragrafo">
-      Informo, ainda, que a análise foi realizada a partir da documentação apresentada pelo requerente, qual seja, CNIS.
-    </p>
-
-    <p class="conclusao-paragrafo">
-      Colocamo-nos à disposição para auxiliar em todas as etapas do processo e esclarecer quaisquer dúvidas que possam surgir durante a correção das pendências analisadas nesta análise de CNIS, estando nossa equipe disponível, especialmente, nas próximas 48 horas úteis para sanar todas as dúvidas.
-    </p>
   </div>
 
   <div class="conclusao-rodape">
