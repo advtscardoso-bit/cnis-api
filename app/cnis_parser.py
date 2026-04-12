@@ -176,22 +176,33 @@ def parse_competencia(texto_comp: str) -> Optional[str]:
 def extrair_indicadores_linha(linha: str) -> list[str]:
     """Extrai códigos de indicadores de uma linha de texto.
 
-    Filtra falsos positivos (meses, números, palavras comuns do CNIS).
+    Indicadores reais do CNIS sempre contêm hífen (ex: IREC-LC123,
+    PREC-MENOR-MIN, PEXT, IEAN) ou são códigos curtos conhecidos.
+    Palavras simples em maiúsculas (BANCO, TURISMO, LTDA) NÃO são indicadores.
     """
-    falsos_positivos = {
-        'NIT', 'CPF', 'NB', 'SEQ', 'CNPJ', 'CEI', 'GPS', 'GFIP',
-        'RAIS', 'CNIS', 'PDF', 'INSS', 'RGPS', 'RPPS', 'SM',
-        'JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN',
-        'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ',
-        'DATA', 'NOME', 'TIPO', 'ULT', 'REM', 'EMP',
+    # Indicadores conhecidos sem hífen (exceções)
+    indicadores_sem_hifen = {
+        'PEXT', 'IEAN', 'PRPPS',
+        'AVRC-DEF', 'AEXT-VT', 'ACNISVR',
     }
 
-    matches = RE_INDICADOR.findall(linha)
+    # Regex: só captura palavras que contêm pelo menos um hífen
+    # Ex: IREC-LC123, PREC-MENOR-MIN, PADM-EMPR, PSC-MEN-SM-EC103
+    re_indicador_hifen = re.compile(r'([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+)')
+
+    matches = re_indicador_hifen.findall(linha)
     indicadores = []
+
     for m in matches:
-        if m not in falsos_positivos and len(m) >= 3:
-            indicadores.append(m)
-    return indicadores
+        indicadores.append(m)
+
+    # Também verificar indicadores conhecidos sem hífen
+    palavras = re.findall(r'\b([A-Z]{3,})\b', linha)
+    for p in palavras:
+        if p in indicadores_sem_hifen:
+            indicadores.append(p)
+
+    return list(set(indicadores))  # Deduplica
 
 
 def identificar_tipo_vinculo(texto_bloco: str) -> str:
@@ -312,6 +323,40 @@ def parse_remuneracoes_bloco(bloco_texto: str) -> list[dict]:
     return remuneracoes
 
 
+def extrair_legenda_indicadores(texto_completo: str) -> set:
+    """Extrai os indicadores da seção 'Legenda de Indicadores' do CNIS.
+
+    O CNIS tem uma tabela no final com todos os indicadores usados no extrato.
+    Ex: IREC-INDPEND, IREC-LC123, IREC-LIM-SM, PREC-MENOR-MIN
+    Esses são os ÚNICOS indicadores válidos do extrato.
+    """
+    indicadores_legenda = set()
+
+    # Procurar a seção "Legenda de Indicadores" ou "Legenda"
+    match_legenda = re.search(
+        r'[Ll]egenda\s+(?:de\s+)?[Ii]ndicadores?(.*?)(?:Página|\Z)',
+        texto_completo,
+        re.DOTALL
+    )
+
+    if match_legenda:
+        bloco_legenda = match_legenda.group(1)
+        # Extrair códigos com hífen (IREC-LC123, PREC-MENOR-MIN, etc.)
+        codigos = re.findall(r'([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+)', bloco_legenda)
+        indicadores_legenda.update(codigos)
+
+        # Também extrair códigos conhecidos sem hífen (PEXT, IEAN, etc.)
+        palavras = re.findall(r'\b([A-Z]{3,})\b', bloco_legenda)
+        indicadores_conhecidos_sem_hifen = {
+            'PEXT', 'IEAN', 'PRPPS', 'ACNISVR',
+        }
+        for p in palavras:
+            if p in indicadores_conhecidos_sem_hifen:
+                indicadores_legenda.add(p)
+
+    return indicadores_legenda
+
+
 def segmentar_vinculos(texto_completo: str) -> list[str]:
     """Divide o texto em blocos, um por vínculo.
 
@@ -381,14 +426,31 @@ def parse_cnis(pdf_path: str) -> dict:
             'dados': None,
         }
 
-    # 3. Segmentar e parsear vínculos
+    # 3. Extrair legenda de indicadores do CNIS (fonte oficial)
+    legenda_indicadores = extrair_legenda_indicadores(texto_limpo)
+
+    # 4. Segmentar e parsear vínculos
     blocos = segmentar_vinculos(texto_limpo)
     vinculos = []
     for i, bloco in enumerate(blocos):
         vinculo = parse_bloco_vinculo(bloco, seq=i + 1)
         vinculos.append(vinculo)
 
-    # 4. Calcular resumo
+    # 5. Filtrar indicadores: só manter os que estão na legenda do CNIS
+    #    ou no dicionário de indicadores conhecidos
+    if legenda_indicadores:
+        for v in vinculos:
+            v['indicadores_vinculo'] = [
+                ind for ind in v['indicadores_vinculo']
+                if ind in legenda_indicadores
+            ]
+            for r in v['remuneracoes']:
+                r['indicadores'] = [
+                    ind for ind in r['indicadores']
+                    if ind in legenda_indicadores
+                ]
+
+    # 6. Calcular resumo
     todas_remuneracoes = []
     for v in vinculos:
         todas_remuneracoes.extend(v['remuneracoes'])
@@ -396,7 +458,7 @@ def parse_cnis(pdf_path: str) -> dict:
     competencias = [r['competencia'] for r in todas_remuneracoes if r['competencia']]
     competencias_sorted = sorted(competencias, key=lambda c: (c[3:7], c[0:2]))
 
-    # Coletar todos os indicadores únicos
+    # Coletar todos os indicadores únicos (já filtrados)
     todos_indicadores = set()
     for v in vinculos:
         todos_indicadores.update(v['indicadores_vinculo'])
