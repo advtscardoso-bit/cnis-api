@@ -707,21 +707,22 @@ def gerar_conclusao(cabecalho, qualidade, indicadores_info, lacunas_info,
             ),
         })
 
-    # 5. LACUNAS CONTRIBUTIVAS — detalhar cada lacuna
+    # 5. LACUNAS CONTRIBUTIVAS — tabela detalhada
     lacunas_lista = lacunas_info.get('lista', [])
     if lacunas_lista:
-        detalhes_lacunas = []
+        tabela_lacunas = []
         for lac in lacunas_lista:
-            detalhes_lacunas.append(
-                f'De {lac["data_fim"]} (saída de {lac["empregador_anterior"]}) '
-                f'até {lac["data_inicio"]} (entrada em {lac["empregador_posterior"]}): '
-                f'{lac["anos_meses"]} sem contribuição (gravidade {lac["gravidade"]})'
-            )
-        lista_lacunas = '; '.join(detalhes_lacunas)
+            tabela_lacunas.append({
+                'de': lac['data_fim'],
+                'empregador_anterior': lac['empregador_anterior'],
+                'ate': lac['data_inicio'],
+                'empregador_posterior': lac['empregador_posterior'],
+                'duracao': lac['anos_meses'],
+                'gravidade': lac['gravidade'],
+            })
         problemas.append({
             'problema': (
-                f'Foram identificadas {len(lacunas_lista)} lacuna(s) contributiva(s) no '
-                f'extrato: {lista_lacunas}.'
+                f'Foram identificadas {len(lacunas_lista)} lacuna(s) contributiva(s) no extrato.'
             ),
             'impacto': (
                 'Lacunas representam períodos sem contribuição ao INSS. Além de reduzir o '
@@ -729,6 +730,7 @@ def gerar_conclusao(cabecalho, qualidade, indicadores_info, lacunas_info,
                 'de segurado, impactar negativamente a carência para benefícios e atrasar '
                 'a data da aposentadoria.'
             ),
+            'tabela_lacunas': tabela_lacunas,
         })
 
     # 6. VÍNCULOS SEM DATA DE SAÍDA — identificar quais

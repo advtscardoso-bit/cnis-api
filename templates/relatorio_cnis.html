@@ -963,6 +963,35 @@ body {
   font-style: italic;
 }
 
+/* Tabela de lacunas na conclusão */
+.conclusao-tabela-lacunas {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0 10px 0;
+  font-family: 'Montserrat', sans-serif;
+  font-size: 9px;
+}
+.conclusao-tabela-lacunas th {
+  background: var(--cor-principal);
+  color: var(--cor-texto-branco);
+  padding: 5px 6px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 8px;
+  text-transform: uppercase;
+}
+.conclusao-tabela-lacunas td {
+  padding: 4px 6px;
+  border-bottom: 1px solid #ddd;
+}
+.conclusao-tabela-lacunas tr:nth-child(even) {
+  background: #f8f8f8;
+}
+.gravidade-baixa { color: #2a6b2a; font-weight: 600; }
+.gravidade-media { color: #b8860b; font-weight: 600; }
+.gravidade-alta { color: #cc4400; font-weight: 600; }
+.gravidade-critica { color: #cc0000; font-weight: 700; }
+
 /* Cards de dados do segurado não quebram */
 .dados-card {
   page-break-inside: avoid;
@@ -1337,6 +1366,32 @@ body {
     {% for item in conclusao.problemas %}
     <div class="conclusao-problema">
       <p class="conclusao-paragrafo"><strong>{{ loop.index }}. {{ item.problema }}</strong></p>
+      {% if item.tabela_lacunas %}
+      <table class="conclusao-tabela-lacunas">
+        <thead>
+          <tr>
+            <th>De</th>
+            <th>Empregador Anterior</th>
+            <th>Até</th>
+            <th>Empregador Seguinte</th>
+            <th>Duração</th>
+            <th>Gravidade</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for lac in item.tabela_lacunas %}
+          <tr>
+            <td>{{ lac.de }}</td>
+            <td>{{ lac.empregador_anterior }}</td>
+            <td>{{ lac.ate }}</td>
+            <td>{{ lac.empregador_posterior }}</td>
+            <td>{{ lac.duracao }}</td>
+            <td class="gravidade-{{ lac.gravidade|lower }}">{{ lac.gravidade }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
       <p class="conclusao-paragrafo conclusao-impacto">{{ item.impacto }}</p>
     </div>
     {% endfor %}
