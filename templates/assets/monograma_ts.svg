@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <style>
+      .ts-letter { font-family: 'Playfair Display', Georgia, serif; font-weight: 700; }
+    </style>
+  </defs>
+  <!-- Círculo decorativo externo -->
+  <circle cx="100" cy="100" r="95" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3"/>
+  <circle cx="100" cy="100" r="88" fill="none" stroke="currentColor" stroke-width="0.5" opacity="0.2"/>
+  <!-- Letras T e S entrelaçadas -->
+  <text x="52" y="135" class="ts-letter" font-size="110" fill="currentColor" opacity="0.9">T</text>
+  <text x="95" y="145" class="ts-letter" font-size="100" fill="currentColor" opacity="0.85">S</text>
+  <!-- Linha decorativa inferior -->
+  <line x1="40" y1="160" x2="160" y2="160" stroke="currentColor" stroke-width="1" opacity="0.4"/>
+</svg>

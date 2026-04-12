@@ -1,0 +1,182 @@
+{
+  "PENDENCIAS": {
+    "PEXT": {
+      "nome": "Extemporaneidade de vínculo",
+      "descricao": "O vínculo foi cadastrado fora do prazo regular, o que gera pendência no cômputo do período.",
+      "impacto": "O período pode não ser contado para tempo de contribuição e carência até que seja regularizado.",
+      "acao": "Solicitar acerto de vínculo no INSS com documentos comprobatórios (CTPS, contracheques, RAIS)."
+    },
+    "PADM-EMPR": {
+      "nome": "Admissão anterior à abertura da empresa",
+      "descricao": "A data de admissão do trabalhador é anterior à data de abertura da empresa na Receita Federal.",
+      "impacto": "O vínculo pode ser desconsiderado pelo INSS por inconsistência cadastral.",
+      "acao": "Verificar CTPS e documentos da empresa. Solicitar retificação no CNIS ou ação judicial se necessário."
+    },
+    "PRES-EMPR": {
+      "nome": "Rescisão posterior ao encerramento da empresa",
+      "descricao": "A data de rescisão é posterior à data de encerramento da empresa na Receita Federal.",
+      "impacto": "O período após o encerramento da empresa pode não ser computado.",
+      "acao": "Verificar documentação de rescisão e solicitar correção administrativa ou judicial."
+    },
+    "PDIV-DADOS-GFIP": {
+      "nome": "Divergência de dados GFIP",
+      "descricao": "Os dados informados na GFIP divergem dos registros do CNIS (similaridade ≤40%).",
+      "impacto": "As remunerações do período podem não ser consideradas no cálculo do benefício.",
+      "acao": "Solicitar ao empregador a retificação da GFIP ou apresentar documentos ao INSS."
+    },
+    "PEMP-CAD": {
+      "nome": "Falta de dados cadastrais do empregador",
+      "descricao": "O empregador não possui dados cadastrais completos no sistema.",
+      "impacto": "O vínculo pode ser desconsiderado por falta de identificação do empregador.",
+      "acao": "Apresentar CTPS, contracheques e documentos que identifiquem o empregador."
+    },
+    "PEMP-IDINV": {
+      "nome": "Identificador do empregador inválido",
+      "descricao": "O CNPJ ou CEI do empregador está inválido ou não consta na base da Receita Federal.",
+      "impacto": "O vínculo pode não ser computado por impossibilidade de confirmar o empregador.",
+      "acao": "Solicitar retificação do cadastro do empregador junto ao INSS."
+    },
+    "PREC-MENOR-MIN": {
+      "nome": "Recolhimento abaixo do mínimo",
+      "descricao": "O valor recolhido como contribuição está abaixo do valor mínimo exigido.",
+      "impacto": "A competência não será contada para carência nem tempo de contribuição.",
+      "acao": "Complementar a contribuição até o valor do salário mínimo vigente na competência."
+    },
+    "PREM-MENOR-MIN": {
+      "nome": "Remuneração abaixo do salário mínimo",
+      "descricao": "A remuneração registrada está abaixo do salário mínimo vigente na competência.",
+      "impacto": "A competência pode não contar para carência. O salário de contribuição pode ser desconsiderado.",
+      "acao": "Verificar se é proporcional (admissão/rescisão no mês). Caso contrário, solicitar correção ou agrupamento."
+    },
+    "PSC-MEN-SM-EC103": {
+      "nome": "Contribuição abaixo do SM pós-EC 103/2019",
+      "descricao": "Após a Reforma da Previdência, contribuição abaixo do salário mínimo não conta para nenhum fim.",
+      "impacto": "A competência é desconsiderada para carência, tempo de contribuição e cálculo do benefício.",
+      "acao": "Complementar a alíquota para atingir o valor mínimo sobre o salário mínimo vigente."
+    },
+    "PREM-EXT": {
+      "nome": "Remuneração extemporânea",
+      "descricao": "A remuneração foi informada fora do prazo regular pelo empregador.",
+      "impacto": "O INSS pode desconsiderar o valor para fins de cálculo até que seja validado.",
+      "acao": "Solicitar validação da remuneração com documentos comprobatórios."
+    },
+    "PREM-EMPR": {
+      "nome": "Remuneração antes do início da empresa",
+      "descricao": "Existe remuneração registrada em competência anterior à abertura da empresa.",
+      "impacto": "A remuneração pode ser desconsiderada por inconsistência temporal.",
+      "acao": "Verificar documentação e solicitar retificação."
+    },
+    "PREM-BLOQ-EC103": {
+      "nome": "Remuneração bloqueada pós-reforma",
+      "descricao": "Remuneração bloqueada por regras da EC 103/2019.",
+      "impacto": "O valor não será utilizado no cálculo do benefício.",
+      "acao": "Verificar enquadramento na regra e buscar complementação se cabível."
+    },
+    "PMOV-INCONSIST": {
+      "nome": "Movimentação inconsistente",
+      "descricao": "Há inconsistência nas movimentações do vínculo (admissão, afastamento, retorno, rescisão).",
+      "impacto": "Parte do período pode não ser computada corretamente.",
+      "acao": "Solicitar correção das movimentações ao empregador ou ao INSS."
+    },
+    "PDT-NASC-FIL-INV": {
+      "nome": "Data de nascimento/filiação inválida",
+      "descricao": "A data de nascimento ou filiação do segurado está inconsistente no cadastro.",
+      "impacto": "Pode afetar o cálculo da idade e elegibilidade para benefícios.",
+      "acao": "Solicitar retificação do cadastro com certidão de nascimento."
+    },
+    "PREM-NASC": {
+      "nome": "Remuneração antes do nascimento",
+      "descricao": "Existe remuneração registrada em data anterior ao nascimento do segurado.",
+      "impacto": "Dados claramente inconsistentes — o período será desconsiderado.",
+      "acao": "Solicitar exclusão da remuneração inconsistente junto ao INSS."
+    },
+    "PREM-OBITO": {
+      "nome": "Remuneração após o óbito",
+      "descricao": "Existe remuneração registrada após a data de óbito do segurado.",
+      "impacto": "Dados inconsistentes que precisam de correção.",
+      "acao": "Solicitar correção ao INSS apresentando certidão de óbito."
+    },
+    "PDESFAZ-AJ-EC103": {
+      "nome": "Desfazimento de ajuste EC 103/2019",
+      "descricao": "Um ajuste previamente realizado foi desfeito por força da EC 103/2019.",
+      "impacto": "A competência pode voltar a ter pendência que havia sido resolvida.",
+      "acao": "Verificar o histórico do ajuste e solicitar novo acerto se necessário."
+    }
+  },
+  "ALERTAS": {
+    "IEAN": {
+      "nome": "Exposição a agentes nocivos",
+      "descricao": "O vínculo possui registro de exposição a agentes nocivos (atividade especial).",
+      "impacto": "Período pode ser convertido com fator de conversão para aposentadoria especial (1.4 homem, 1.2 mulher para 25 anos).",
+      "acao": "Verificar PPP e LTCAT do empregador. Confirmar se a conversão está sendo aplicada pelo INSS."
+    },
+    "IREC-LC123": {
+      "nome": "Plano simplificado 11% (LC 123/2006)",
+      "descricao": "O recolhimento foi feito na alíquota de 11% sobre o salário mínimo (plano simplificado).",
+      "impacto": "NÃO dá direito à Aposentadoria por Tempo de Contribuição. Apenas Aposentadoria por Idade.",
+      "acao": "Para usar este tempo em regras de transição por tempo, complementar a alíquota para 20%."
+    },
+    "IREC-MEI": {
+      "nome": "Recolhimento MEI (5%)",
+      "descricao": "O recolhimento foi feito como Microempreendedor Individual na alíquota de 5%.",
+      "impacto": "NÃO dá direito à Aposentadoria por Tempo de Contribuição. Apenas Aposentadoria por Idade. Valor limitado ao salário mínimo.",
+      "acao": "Para usar em aposentadoria por tempo, complementar com mais 15% (total 20%) via GPS código 1910."
+    },
+    "IREC-FBR": {
+      "nome": "Facultativo baixa renda (5%)",
+      "descricao": "Recolhimento como facultativo de baixa renda na alíquota de 5% sobre o salário mínimo.",
+      "impacto": "NÃO dá direito à Aposentadoria por Tempo de Contribuição. Apenas por Idade.",
+      "acao": "Para usar em aposentadoria por tempo, complementar para 20%."
+    },
+    "IREC-FBR-SUP": {
+      "nome": "Facultativo baixa renda com recolhimento acima do mínimo",
+      "descricao": "Contribuição de facultativo baixa renda com valor acima do esperado para a alíquota.",
+      "impacto": "Pode haver inconsistência entre a alíquota declarada e o valor recolhido.",
+      "acao": "Verificar se o valor está correto ou se houve erro no recolhimento."
+    },
+    "IREC-LIM-SM": {
+      "nome": "Contribuição limitada ao salário mínimo",
+      "descricao": "A contribuição está limitada ao valor do salário mínimo.",
+      "impacto": "O salário de contribuição para cálculo do benefício será o mínimo, mesmo que tenha renda maior.",
+      "acao": "Informativo. Se deseja benefício acima do mínimo, recolher sobre valor maior."
+    },
+    "IREC-INDPEND": {
+      "nome": "Recolhimentos com indicadores",
+      "descricao": "Existem recolhimentos no período que possuem indicadores pendentes associados.",
+      "impacto": "As contribuições podem não ser consideradas até resolução dos indicadores.",
+      "acao": "Verificar quais indicadores afetam as contribuições e tomar as providências cabíveis."
+    },
+    "IREM-INDPEND": {
+      "nome": "Remuneração com indícios de pendência",
+      "descricao": "A remuneração possui indícios de pendência que ainda não foram formalizados como P.",
+      "impacto": "Risco de a remuneração ser desconsiderada em análise futura.",
+      "acao": "Monitorar e providenciar documentação comprobatória preventivamente."
+    },
+    "PRPPS": {
+      "nome": "Vínculo em Regime Próprio (RPPS)",
+      "descricao": "O vínculo pertence ao Regime Próprio de Previdência Social (servidor público).",
+      "impacto": "Este tempo pode ser utilizado via CTC (Certidão de Tempo de Contribuição) para o RGPS.",
+      "acao": "Verificar se há necessidade de CTC para contagem recíproca."
+    }
+  },
+  "ACERTOS": {
+    "AVRC-DEF": {
+      "nome": "Acerto deferido",
+      "descricao": "Um pedido de acerto/retificação de dados foi deferido pelo INSS.",
+      "impacto": "Positivo — o dado foi corrigido e está regular.",
+      "acao": "Nenhuma ação necessária. Dado regularizado."
+    },
+    "AEXT-VT": {
+      "nome": "Validação total de extemporâneo",
+      "descricao": "Um vínculo extemporâneo foi totalmente validado pelo INSS.",
+      "impacto": "Positivo — o período extemporâneo está regular e será computado.",
+      "acao": "Nenhuma ação necessária. Vínculo validado."
+    },
+    "ACNISVR": {
+      "nome": "Acerto CNIS VR",
+      "descricao": "Acerto de dados no CNIS por validação retroativa.",
+      "impacto": "Positivo — dados foram corrigidos retroativamente.",
+      "acao": "Nenhuma ação necessária. Dados atualizados."
+    }
+  }
+}
