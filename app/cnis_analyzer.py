@@ -563,117 +563,179 @@ def gerar_conclusao(cabecalho, qualidade, indicadores_info, lacunas_info,
                     remuneracoes_info, verificacoes_info, tempo_info, vinculos) -> dict:
     """Gera a conclusão completa da análise de CNIS.
 
-    A conclusão identifica os problemas encontrados e seus impactos na
-    aposentadoria. NÃO sugere soluções — apenas descreve os problemas.
+    Para cada problema encontrado, lista:
+      1. O problema (o que foi encontrado)
+      2. O impacto na vida do segurado (negativa do INSS, aposentadoria menor, demora)
+
+    NÃO apresenta soluções — a Análise de CNIS apresenta apenas os problemas.
+
+    Problemas detectados:
+      - Perda da qualidade de segurado
+      - Pendências bloqueando períodos
+      - Salários abaixo do mínimo
+      - Contribuições MEI/simplificado sem validade para tempo
+      - Lacunas contributivas
+      - Vínculos sem data de saída
+      - Remunerações em moeda antiga
+      - Indicadores pendentes
     """
     nome = cabecalho.get('nome', 'N/I')
     problemas = []
 
-    # 1. QUALIDADE DE SEGURADO
+    # 1. PERDA DA QUALIDADE DE SEGURADO
     if qualidade.get('status', '') == 'PERDIDA':
-        problemas.append(
-            f'O(a) Sr(a). {nome} perdeu a qualidade de segurado(a). '
-            f'A última contribuição foi em {qualidade.get("ultima_contribuicao", "N/I")} '
-            f'e o período de graça expirou em {qualidade.get("data_perda_estimada", "N/I")}. '
-            'Sem qualidade de segurado, não há direito a nenhum benefício do INSS em caso '
-            'de doença, acidente ou óbito.'
-        )
+        problemas.append({
+            'problema': (
+                f'O(a) Sr(a). {nome} perdeu a qualidade de segurado(a). '
+                f'A última contribuição foi em {qualidade.get("ultima_contribuicao", "N/I")} '
+                f'e o período de graça expirou em {qualidade.get("data_perda_estimada", "N/I")}.'
+            ),
+            'impacto': (
+                'Sem qualidade de segurado, o(a) segurado(a) não tem direito a nenhum benefício '
+                'do INSS em caso de doença, acidente ou óbito. Caso venha a precisar de '
+                'auxílio-doença, aposentadoria por invalidez ou seus dependentes necessitem de '
+                'pensão por morte, o INSS negará o pedido.'
+            ),
+        })
 
-    # 2. PENDÊNCIAS (INDICADORES P)
+    # 2. PENDÊNCIAS BLOQUEANDO PERÍODOS (INDICADORES P)
     pendencias = indicadores_info.get('pendencias', [])
     if pendencias:
-        nomes_pend = ', '.join([p['codigo'] for p in pendencias])
-        problemas.append(
-            f'Foram identificadas {len(pendencias)} pendência(s) no extrato ({nomes_pend}). '
-            'Pendências são bloqueios que impedem o cômputo de períodos contributivos. '
-            'Enquanto não forem resolvidas, o INSS pode desconsiderar esses períodos, '
-            'o que pode atrasar a aposentadoria ou reduzir o valor do benefício.'
-        )
+        codigos_pend = ', '.join([p['codigo'] for p in pendencias])
+        problemas.append({
+            'problema': (
+                f'Foram identificadas {len(pendencias)} pendência(s) no extrato '
+                f'({codigos_pend}). Pendências são bloqueios formais que impedem o cômputo '
+                'de períodos contributivos pelo INSS.'
+            ),
+            'impacto': (
+                'Enquanto as pendências não forem resolvidas, o INSS pode desconsiderar '
+                'esses períodos no cálculo do tempo de contribuição e da carência. Isso pode '
+                'atrasar a aposentadoria, reduzir o valor do benefício ou até gerar uma '
+                'negativa na hora de requerer o benefício.'
+            ),
+        })
 
     # 3. SALÁRIOS ABAIXO DO MÍNIMO
     total_abaixo = remuneracoes_info.get('total_abaixo_minimo', 0)
     if total_abaixo > 0:
-        problemas.append(
-            f'Foram identificadas {total_abaixo} competência(s) com remuneração abaixo do '
-            'salário mínimo vigente. Contribuições abaixo do mínimo NÃO contam para carência '
-            'e NÃO são computadas no tempo de contribuição. O(a) segurado(a) pode estar com '
-            'menos tempo de contribuição do que imagina, o que pode atrasar significativamente '
-            'a data da aposentadoria ou resultar em um benefício menor.'
-        )
+        problemas.append({
+            'problema': (
+                f'Foram identificadas {total_abaixo} competência(s) com remuneração abaixo '
+                'do salário mínimo vigente na época.'
+            ),
+            'impacto': (
+                'Contribuições abaixo do salário mínimo NÃO contam para carência e NÃO são '
+                'computadas no tempo de contribuição. O(a) segurado(a) pode estar com menos '
+                'tempo de contribuição do que imagina, o que pode atrasar significativamente '
+                'a data da aposentadoria ou resultar em um benefício com valor menor do que '
+                'teria direito.'
+            ),
+        })
 
     # 4. CONTRIBUIÇÕES MEI / PLANO SIMPLIFICADO
     alertas_mei = [a for a in indicadores_info.get('alertas', [])
                    if a['codigo'] in ('IREC-LC123', 'IREC-MEI', 'IREC-FBR')]
     if alertas_mei:
-        problemas.append(
-            'O extrato contém contribuições realizadas no plano simplificado (11% sobre o '
-            'salário mínimo) ou como MEI (5%). Essas contribuições NÃO dão direito à '
-            'Aposentadoria por Tempo de Contribuição — apenas à Aposentadoria por Idade. '
-            'Se o(a) segurado(a) pretende se aposentar por tempo de contribuição ou utilizar '
-            'regras de transição, esses períodos não serão contados, o que pode atrasar '
-            'a aposentadoria em anos.'
-        )
+        tipos = []
+        for a in alertas_mei:
+            if a['codigo'] == 'IREC-MEI':
+                tipos.append('MEI (5%)')
+            elif a['codigo'] == 'IREC-LC123':
+                tipos.append('plano simplificado (11%)')
+            elif a['codigo'] == 'IREC-FBR':
+                tipos.append('facultativo baixa renda (5%)')
+        tipos_str = ', '.join(set(tipos))
+        problemas.append({
+            'problema': (
+                f'O extrato contém contribuições realizadas como {tipos_str}.'
+            ),
+            'impacto': (
+                'Essas contribuições NÃO dão direito à Aposentadoria por Tempo de Contribuição '
+                '— servem apenas para Aposentadoria por Idade. Se o(a) segurado(a) pretende se '
+                'aposentar por tempo de contribuição ou utilizar regras de transição, esses '
+                'períodos não serão contados, o que pode atrasar a aposentadoria em anos.'
+            ),
+        })
 
     # 5. LACUNAS CONTRIBUTIVAS
     total_lacunas = lacunas_info.get('total', 0)
     if total_lacunas > 0:
         maior_lacuna = lacunas_info.get('maior_lacuna_meses', 0)
-        problemas.append(
-            f'Foram identificadas {total_lacunas} lacuna(s) contributiva(s), sendo a maior '
-            f'de {maior_lacuna} meses. Lacunas representam períodos sem contribuição ao INSS. '
-            'Além de reduzir o tempo total de contribuição, lacunas longas podem causar a '
-            'perda da qualidade de segurado e impactar negativamente a carência para benefícios.'
-        )
+        problemas.append({
+            'problema': (
+                f'Foram identificadas {total_lacunas} lacuna(s) contributiva(s), sendo a '
+                f'maior de {maior_lacuna} meses.'
+            ),
+            'impacto': (
+                'Lacunas representam períodos sem contribuição ao INSS. Além de reduzir o '
+                'tempo total de contribuição, lacunas longas podem causar a perda da qualidade '
+                'de segurado, impactar negativamente a carência para benefícios e atrasar '
+                'a data da aposentadoria.'
+            ),
+        })
 
-    # 6. VÍNCULOS SEM DATA FIM
+    # 6. VÍNCULOS SEM DATA DE SAÍDA
     vinculos_sem_fim = verificacoes_info.get('vinculos_sem_fim', [])
     if vinculos_sem_fim:
-        problemas.append(
-            f'Foram identificados {len(vinculos_sem_fim)} vínculo(s) sem data de saída '
-            'registrada. O INSS pode não ter o registro correto da rescisão, o que pode '
-            'causar inconsistências no cálculo do tempo de contribuição e dificultar a '
-            'concessão do benefício.'
-        )
+        problemas.append({
+            'problema': (
+                f'Foram identificados {len(vinculos_sem_fim)} vínculo(s) sem data de saída '
+                'registrada no CNIS.'
+            ),
+            'impacto': (
+                'O INSS pode não ter o registro correto da rescisão, o que causa inconsistências '
+                'no cálculo do tempo de contribuição. Na hora de requerer a aposentadoria, o INSS '
+                'pode exigir a regularização antes de conceder o benefício, gerando atrasos.'
+            ),
+        })
 
     # 7. REMUNERAÇÕES EM MOEDA ANTIGA
     total_moeda_antiga = remuneracoes_info.get('total_moeda_antiga', 0)
     if total_moeda_antiga > 0:
-        problemas.append(
-            f'O extrato contém {total_moeda_antiga} remuneração(ões) registrada(s) em moeda '
-            'antiga (Cruzeiro, Cruzado, etc.). Se a conversão para o Real não estiver correta, '
-            'o valor do benefício pode ser calculado abaixo do devido.'
-        )
+        problemas.append({
+            'problema': (
+                f'O extrato contém {total_moeda_antiga} remuneração(ões) registrada(s) em '
+                'moeda antiga (Cruzeiro, Cruzado, etc.).'
+            ),
+            'impacto': (
+                'Se a conversão para o Real não estiver correta, o valor do salário de '
+                'contribuição será calculado abaixo do real, resultando em uma aposentadoria '
+                'com valor menor do que o(a) segurado(a) teria direito.'
+            ),
+        })
 
-    # 8. INDICADORES PENDENTES (IREC-INDPEND)
+    # 8. INDICADORES PENDENTES (IREC-INDPEND / IREM-INDPEND)
     alertas_indpend = [a for a in indicadores_info.get('alertas', [])
-                       if a['codigo'] == 'IREC-INDPEND']
+                       if a['codigo'] in ('IREC-INDPEND', 'IREM-INDPEND')]
     if alertas_indpend:
-        problemas.append(
-            'Existem recolhimentos com indicadores pendentes (IREC-INDPEND). Há indícios de '
-            'problemas nesses recolhimentos que podem impedir sua contagem. As contribuições '
-            'podem não ser consideradas pelo INSS até que sejam resolvidos.'
-        )
+        problemas.append({
+            'problema': (
+                'Existem recolhimentos ou remunerações com indicadores pendentes no extrato. '
+                'Há indícios de problemas nesses registros que podem impedir sua contagem.'
+            ),
+            'impacto': (
+                'As contribuições afetadas podem não ser consideradas pelo INSS no cálculo '
+                'do tempo de contribuição e do valor do benefício até que os indicadores '
+                'sejam resolvidos. Isso pode atrasar a aposentadoria ou reduzir seu valor.'
+            ),
+        })
 
-    # MONTAR TEXTO DA CONCLUSÃO
-    paragrafos_problemas = []
+    # MONTAR RESULTADO
+    # Parágrafo de abertura
     if problemas:
-        paragrafos_problemas.append(
+        paragrafo_abertura = (
             f'Diante da análise realizada no extrato de CNIS do(a) Sr(a). {nome}, '
-            f'foram identificados os seguintes problemas que podem impactar diretamente '
-            f'a concessão, o valor e o tempo da aposentadoria:'
-        )
-        for i, prob in enumerate(problemas, 1):
-            paragrafos_problemas.append(f'{i}. {prob}')
-
-        paragrafos_problemas.append(
-            'Esses problemas, se não corrigidos, podem resultar em negativas do INSS, '
-            'aposentadoria com valor inferior ao devido ou demora maior do que o necessário '
-            'para se aposentar.'
+            f'foram identificados {len(problemas)} problema(s) que podem impactar diretamente '
+            'a concessão, o valor e o tempo da aposentadoria. É fundamental que esses problemas '
+            'sejam corrigidos para evitar negativas do INSS, aposentadoria com valor inferior '
+            'ao devido ou demora maior do que o necessário para se aposentar.'
         )
     else:
-        paragrafos_problemas.append(
+        paragrafo_abertura = (
             f'Diante da análise realizada no extrato de CNIS do(a) Sr(a). {nome}, '
-            'não foram identificados problemas graves. O extrato encontra-se em boas condições.'
+            'não foram identificados problemas que impeçam ou prejudiquem a concessão de '
+            'benefícios previdenciários. O extrato encontra-se em boas condições.'
         )
 
     # PARÁGRAFOS FIXOS (sempre ao final)
@@ -694,7 +756,7 @@ def gerar_conclusao(cabecalho, qualidade, indicadores_info, lacunas_info,
     return {
         'problemas': problemas,
         'total_problemas': len(problemas),
-        'paragrafos_problemas': paragrafos_problemas,
+        'paragrafo_abertura': paragrafo_abertura,
         'paragrafos_fixos': paragrafos_fixos,
     }
 

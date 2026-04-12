@@ -7,6 +7,7 @@ Modos de uso:
   2. Via linha de comando: python cnis_report_generator.py (lê JSON de stdin, escreve HTML em stdout)
 """
 
+import base64
 import json
 import sys
 import os
@@ -49,6 +50,12 @@ def gerar_html(dados_analise: dict) -> str:
     env = criar_ambiente_jinja()
     template = env.get_template('relatorio_cnis.html')
 
+    # Carregar logo como base64 para embutir no HTML (Gotenberg não acessa paths locais)
+    logo_path = Path(TEMPLATES_DIR) / 'assets' / 'logo_ts.png'
+    logo_base64 = ''
+    if logo_path.exists():
+        logo_base64 = base64.b64encode(logo_path.read_bytes()).decode('utf-8')
+
     # Preparar contexto para o template
     contexto = {
         'data_analise': dados_analise.get('data_analise', date.today().strftime('%d/%m/%Y')),
@@ -61,7 +68,9 @@ def gerar_html(dados_analise: dict) -> str:
         'lacunas': dados_analise.get('lacunas', {}),
         'remuneracoes': dados_analise.get('remuneracoes', {}),
         'verificacoes': dados_analise.get('verificacoes', {}),
+        'conclusao': dados_analise.get('conclusao', {}),
         'resumo': dados_analise.get('resumo', {}),
+        'logo_base64': logo_base64,
     }
 
     return template.render(**contexto)

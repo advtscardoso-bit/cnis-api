@@ -472,13 +472,6 @@ def pagina_indicadores(doc, dados):
                 'indicadores do extrato.', italic=True, size=11,
                 color=RGBColor(0x88, 0x88, 0x88))
 
-        p = doc.add_paragraph()
-        add_paragraph_spacing(p, before=6, after=6)
-        add_run(p, 'Nota: ', bold=True, size=10, color=COR_LARANJA)
-        add_run(p, 'A ausência de indicadores no extrato resumido não garante que o '
-                'vínculo esteja 100% saneado — recomenda-se verificar o Extrato '
-                'Analítico no Meu INSS.', size=10)
-
     # B) Alertas
     p = doc.add_paragraph()
     add_paragraph_spacing(p, before=12, after=6)
@@ -744,8 +737,7 @@ def pagina_conclusao(doc, dados):
                 'INSS com a documentação apropriada.', size=12)
     else:
         add_run(p, 'O extrato não apresentou indicadores de pendência formal nas '
-                'colunas de indicadores. Recomenda-se, contudo, a verificação do '
-                'Extrato Analítico completo pelo portal Meu INSS.', size=12)
+                'colunas de indicadores.', size=12)
 
     # § 4 — Lacunas
     total_lacunas = lacunas.get('total', 0)

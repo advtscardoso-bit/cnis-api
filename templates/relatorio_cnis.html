@@ -953,6 +953,16 @@ body {
   page-break-inside: avoid;
 }
 
+/* Bloco de problema na conclusão */
+.conclusao-problema {
+  page-break-inside: avoid;
+  margin-bottom: 12px;
+}
+.conclusao-impacto {
+  margin-top: 2px;
+  font-style: italic;
+}
+
 /* Cards de dados do segurado não quebram */
 .dados-card {
   page-break-inside: avoid;
@@ -971,7 +981,7 @@ body {
      ================================================================ -->
 <div class="page page-static page-capa">
   <div class="capa-monograma">
-    <img src="/templates/assets/logo_ts.png" alt="Tatiana Sampaio Advocacia" style="width: 350px; height: auto;">
+    <img src="data:image/png;base64,{{ logo_base64 }}" alt="Tatiana Sampaio Advocacia" style="width: 350px; height: auto;">
   </div>
   <div class="capa-faixa">
     <div class="capa-faixa-titulo">ANÁLISE DE CNIS</div>
@@ -1181,9 +1191,6 @@ body {
   {% endfor %}
   {% else %}
   <p class="indicador-vazio">Nenhuma pendência formal (P) foi identificada nas colunas de indicadores do extrato.</p>
-  <div class="indicador-aviso">
-    &#9888;&#65039; A ausência de indicadores no extrato resumido não garante que o vínculo esteja 100% saneado — recomenda-se verificar o Extrato Analítico no Meu INSS.
-  </div>
   {% endif %}
 
   <!-- B) Alertas -->
@@ -1322,9 +1329,16 @@ body {
   <div class="conclusao-barra-topo"></div>
   <div class="conclusao-titulo">Conclusão</div>
   <div class="conclusao-conteudo">
-    {% if conclusao and conclusao.paragrafos_problemas %}
-    {% for paragrafo in conclusao.paragrafos_problemas %}
-    <p class="conclusao-paragrafo">{{ paragrafo }}</p>
+    {% if conclusao and conclusao.paragrafo_abertura %}
+    <p class="conclusao-paragrafo">{{ conclusao.paragrafo_abertura }}</p>
+    {% endif %}
+
+    {% if conclusao and conclusao.problemas %}
+    {% for item in conclusao.problemas %}
+    <div class="conclusao-problema">
+      <p class="conclusao-paragrafo"><strong>{{ loop.index }}. {{ item.problema }}</strong></p>
+      <p class="conclusao-paragrafo conclusao-impacto">{{ item.impacto }}</p>
+    </div>
     {% endfor %}
     {% endif %}
 
@@ -1381,7 +1395,7 @@ body {
      ================================================================ -->
 <div class="page page-static page-contracapa">
   <div class="contracapa-monograma">
-    <img src="/templates/assets/logo_ts.png" alt="Tatiana Sampaio Advocacia" style="width: 300px; height: auto;">
+    <img src="data:image/png;base64,{{ logo_base64 }}" alt="Tatiana Sampaio Advocacia" style="width: 300px; height: auto;">
   </div>
   <div class="contracapa-faixa">
     <span>OBRIGADA PELA CONFIANÇA</span>
