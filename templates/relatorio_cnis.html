@@ -717,7 +717,13 @@ body {
   padding: 30mm 50px 45px 55px;
   position: relative;
   color: var(--cor-texto-branco);
-  min-height: auto;
+}
+/* Preenchimento para evitar espaco branco apos a conclusao */
+.conclusao-preenchimento {
+  background: var(--cor-principal);
+  height: 297mm;
+  margin: 0 -50px -45px -55px;
+  padding: 0;
 }
 .conclusao-barra-topo {
   position: absolute;
@@ -1454,6 +1460,7 @@ body {
       Em caso de dúvidas estamos à disposição!
     </div>
   </div>
+  <div class="conclusao-preenchimento"></div>
 </div>
 
 <!-- ================================================================
