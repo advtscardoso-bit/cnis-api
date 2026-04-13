@@ -57,10 +57,15 @@ body {
   page-break-after: auto;
 }
 /* Páginas estáticas mantêm altura fixa e overflow hidden */
+/* margin-top negativo compensa o marginTop do Gotenberg (20mm) */
 .page-static {
   height: 297mm;
   min-height: 297mm;
   overflow: hidden;
+  margin-top: -20mm;
+}
+.page-static:first-child {
+  margin-top: 0;
 }
 
 /* Fontes auxiliares */
@@ -319,7 +324,7 @@ body {
    ============================================================ */
 .page-dados {
   background: var(--cor-fundo-claro);
-  padding: 30mm 35px 40px 35px;
+  padding: 10mm 35px 40px 35px;
 }
 .dados-badge {
   display: inline-block;
@@ -385,7 +390,7 @@ body {
    ============================================================ */
 .page-qualidade {
   background: var(--cor-fundo-claro);
-  padding: 30mm 45px 45px 45px;
+  padding: 10mm 45px 45px 45px;
   position: relative;
 }
 .qualidade-titulo {
@@ -434,7 +439,7 @@ body {
    ============================================================ */
 .page-vinculos {
   background: var(--cor-fundo-claro);
-  padding: 30mm 30px 40px 30px;
+  padding: 10mm 30px 40px 30px;
   position: relative;
 }
 .vinculos-titulo {
@@ -520,7 +525,7 @@ body {
    ============================================================ */
 .page-indicadores {
   background: var(--cor-fundo-claro);
-  padding: 30mm 35px 40px 35px;
+  padding: 10mm 35px 40px 35px;
   position: relative;
 }
 .indicadores-titulo {
@@ -598,7 +603,7 @@ body {
    ============================================================ */
 .page-remuneracoes {
   background: var(--cor-fundo-claro);
-  padding: 30mm 30px 40px 30px;
+  padding: 10mm 30px 40px 30px;
   position: relative;
 }
 .remuneracoes-titulo {
@@ -714,7 +719,7 @@ body {
    ============================================================ */
 .page-conclusao {
   background: var(--cor-principal);
-  padding: 30mm 50px 45px 55px;
+  padding: 10mm 50px 45px 55px;
   position: relative;
   color: var(--cor-texto-branco);
 }

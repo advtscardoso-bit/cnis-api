@@ -105,7 +105,7 @@ def gerar_pdf(html: str, timeout: float = 30.0) -> bytes:
     data = {
         'paperWidth': '8.27',    # A4 em polegadas (210mm)
         'paperHeight': '11.69',  # A4 em polegadas (297mm)
-        'marginTop': '0',
+        'marginTop': '0.79',     # 20mm em polegadas — margem em páginas de continuação
         'marginBottom': '0',
         'marginLeft': '0',
         'marginRight': '0',
