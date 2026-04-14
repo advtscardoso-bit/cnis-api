@@ -408,10 +408,8 @@ def _converter_pessoa(
     O CNIS NÃO contém o sexo do segurado. O sexo DEVE vir do formulário.
     Sem sexo, é impossível calcular regras de aposentadoria.
     """
-    # CPF: priorizar CNIS (é o documento oficial)
+    # CPF: vem exclusivamente do CNIS (documento oficial)
     cpf = _limpar_cpf(cabecalho.get("cpf"))
-    if not cpf and formulario:
-        cpf = formulario.cpf
 
     # Nome: CNIS é referência, formulário pode complementar
     nome = cabecalho.get("nome", "")

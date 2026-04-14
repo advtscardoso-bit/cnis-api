@@ -82,7 +82,7 @@ class DadosFormulario(BaseModel):
     nome_completo: str = Field(..., min_length=2, max_length=200)
     sexo: str = Field(..., pattern=r"^(M|F)$", description="M ou F")
     data_nascimento: date = Field(...)
-    cpf: str = Field(..., description="CPF do cliente")
+    cpf: Optional[str] = Field(None, description="CPF do cliente (vem do CNIS, não do formulário)")
     celular: str = Field(..., description="Número com DDD")
     profissao: str = Field(...)
     origem_conhecimento: Optional[OrigemConhecimento] = None
@@ -176,8 +176,10 @@ class DadosFormulario(BaseModel):
 
     @field_validator("cpf")
     @classmethod
-    def limpar_cpf(cls, v: str) -> str:
+    def limpar_cpf(cls, v: Optional[str]) -> Optional[str]:
         """Remove formatação do CPF, mantém apenas dígitos."""
+        if v is None:
+            return None
         return "".join(c for c in v if c.isdigit())
 
     @field_validator("celular")

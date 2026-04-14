@@ -52,7 +52,7 @@ def pessoa_mulher_mista():
 def pessoa_homem_clt():
     """Sr. Carlos — CLT puro, 58 anos, operário."""
     return Pessoa(
-        cpf="45632178905",  # CPF válido fictício
+        cpf="45632178919",  # CPF válido fictício
         nome="CARLOS EDUARDO FERREIRA LIMA",
         data_nascimento=date(1967, 11, 3),
         sexo=Sexo.MASCULINO,
