@@ -6,6 +6,7 @@ Entrada: caminho do PDF
 Saída: JSON estruturado com cabeçalho, vínculos, remunerações e indicadores
 """
 
+import logging
 import re
 import json
 import sys
@@ -13,6 +14,8 @@ from datetime import datetime, date
 from typing import Optional
 
 import pdfplumber
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
@@ -53,19 +56,21 @@ RE_VALOR_MONETARIO = re.compile(r'([\d]{1,3}(?:\.[\d]{3})*,[\d]{2})')
 RE_INDICADOR = re.compile(r'([A-Z][A-Z0-9]{1,}(?:-[A-Z0-9]+)*)')
 
 # Tipos de vínculo/filiação
-TIPOS_VINCULO = {
-    'EMPREGADO': 'Empregado',
-    'CONTRIBUINTE INDIVIDUAL': 'Contribuinte Individual',
-    'CI': 'Contribuinte Individual',
-    'FACULTATIVO': 'Facultativo',
-    'EMPREGADO DOMÉSTICO': 'Empregado Doméstico',
-    'DOMÉSTICO': 'Empregado Doméstico',
-    'TRABALHADOR AVULSO': 'Trabalhador Avulso',
-    'AVULSO': 'Trabalhador Avulso',
-    'SEGURADO ESPECIAL': 'Segurado Especial',
-    'MEI': 'Microempreendedor Individual',
-    'AGENTE PÚBLICO': 'Agente Público',
-}
+# ORDEM IMPORTA: chaves mais específicas primeiro para evitar match parcial.
+# Ex: "EMPREGADO DOMÉSTICO" antes de "EMPREGADO", "SEGURADO ESPECIAL" antes de "CI".
+TIPOS_VINCULO = [
+    ('EMPREGADO DOMÉSTICO', 'Empregado Doméstico'),
+    ('DOMÉSTICO', 'Empregado Doméstico'),
+    ('CONTRIBUINTE INDIVIDUAL', 'Contribuinte Individual'),
+    ('SEGURADO ESPECIAL', 'Segurado Especial'),
+    ('TRABALHADOR AVULSO', 'Trabalhador Avulso'),
+    ('AGENTE PÚBLICO', 'Agente Público'),
+    ('EMPREGADO', 'Empregado'),
+    ('FACULTATIVO', 'Facultativo'),
+    ('AVULSO', 'Trabalhador Avulso'),
+    ('MEI', 'Microempreendedor Individual'),
+    ('CI', 'Contribuinte Individual'),
+]
 
 # Marcadores de seção do CNIS
 MARCADORES_SECAO = [
@@ -150,6 +155,7 @@ def converter_valor(texto_valor: str) -> Optional[float]:
         limpo = texto_valor.replace('.', '').replace(',', '.')
         return float(limpo)
     except (ValueError, AttributeError):
+        logger.warning("Falha ao converter valor monetário: %r", texto_valor)
         return None
 
 
@@ -160,6 +166,7 @@ def parse_data(texto_data: str) -> Optional[date]:
     try:
         return datetime.strptime(texto_data.strip(), '%d/%m/%Y').date()
     except ValueError:
+        logger.warning("Falha ao converter data: %r", texto_data)
         return None
 
 
@@ -206,11 +213,20 @@ def extrair_indicadores_linha(linha: str) -> list[str]:
 
 
 def identificar_tipo_vinculo(texto_bloco: str) -> str:
-    """Identifica o tipo de vínculo/filiação a partir do texto do bloco."""
+    """Identifica o tipo de vínculo/filiação a partir do texto do bloco.
+
+    Usa lista ordenada (mais específico primeiro) para evitar match parcial.
+    Chaves curtas (≤3 chars) usam word boundary para não casar dentro de palavras.
+    """
     texto_upper = texto_bloco.upper()
-    for chave, valor in TIPOS_VINCULO.items():
-        if chave in texto_upper:
-            return valor
+    for chave, valor in TIPOS_VINCULO:
+        if len(chave) <= 3:
+            # Word boundary para chaves curtas ("CI", "MEI") — evita match em "ESPECIAL"
+            if re.search(r'\b' + re.escape(chave) + r'\b', texto_upper):
+                return valor
+        else:
+            if chave in texto_upper:
+                return valor
     return 'Não identificado'
 
 
@@ -280,6 +296,9 @@ def parse_bloco_vinculo(bloco_texto: str, seq: int) -> dict:
             if len(nome) > 3 and vinculo['empregador'] is None:
                 vinculo['empregador'] = nome
                 break
+
+    if vinculo['empregador'] is None:
+        logger.warning("Empregador não identificado no vínculo seq=%d", seq)
 
     # Extrair remunerações
     vinculo['remuneracoes'] = parse_remuneracoes_bloco(bloco_texto)
@@ -382,6 +401,7 @@ def segmentar_vinculos(texto_completo: str) -> list[str]:
         matches = list(padrao_alt.finditer(texto_completo))
 
     if not matches:
+        logger.warning("Nenhum vínculo encontrado no texto (nenhum padrão Seq+NIT ou Empregador)")
         return []
 
     blocos = []
@@ -403,9 +423,11 @@ def parse_cnis(pdf_path: str) -> dict:
         Dicionário com dados estruturados do CNIS
     """
     # 1. Extrair texto de todas as páginas
+    logger.info("Iniciando parsing do CNIS: %s", pdf_path)
     paginas = extrair_texto_pdf(pdf_path)
 
     if not paginas or all(not p.strip() for p in paginas):
+        logger.error("PDF sem texto digital: %s", pdf_path)
         return {
             'sucesso': False,
             'erro': 'PDF sem texto digital — provável escaneamento ou PDF protegido',
@@ -420,6 +442,7 @@ def parse_cnis(pdf_path: str) -> dict:
 
     # Validação mínima: precisa ter pelo menos nome ou NIT
     if not cabecalho['nome'] and not cabecalho['nit']:
+        logger.error("Formato não reconhecido — sem nome nem NIT: %s", pdf_path)
         return {
             'sucesso': False,
             'erro': 'Formato de extrato não reconhecido — não foi possível identificar dados cadastrais',
@@ -475,6 +498,14 @@ def parse_cnis(pdf_path: str) -> dict:
         'total_indicadores_unicos': len(todos_indicadores),
         'indicadores_encontrados': sorted(list(todos_indicadores)),
     }
+
+    logger.info(
+        "Parsing concluído: %s — %d vínculos, %d remunerações, %d indicadores",
+        cabecalho.get('nome', 'N/I'),
+        resumo['total_vinculos'],
+        resumo['total_remuneracoes'],
+        resumo['total_indicadores_unicos'],
+    )
 
     return {
         'sucesso': True,

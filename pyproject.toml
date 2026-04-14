@@ -1,0 +1,31 @@
+[project]
+name = "cnis-system"
+version = "1.0.0"
+description = "Sistema de Planejamento Previdenciário Automatizado — Tatiana Sampaio Advocacia"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "unit: Testes unitários isolados (rápidos)",
+    "integration: Testes de integração (pipeline completo)",
+    "regra: Testes de regras de aposentadoria",
+    "trava: Testes de travas anti-erro",
+    "hypothesis: Testes property-based (edge cases automáticos)",
+    "slow: Testes lentos (OCR, geração de PDF)",
+]
+addopts = "-v --tb=short"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["tests/*", "app/config/*"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 70
