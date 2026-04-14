@@ -18,14 +18,24 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Optional
 
-from app.models.pessoa import Pessoa, Sexo
-from app.models.vinculo import Vinculo, TipoVinculo, SituacaoVinculo, AliquotaContribuicao
-from app.models.contribuicao import Contribuicao, TipoContribuicao
-from app.models.beneficio import Beneficio, EspecieBeneficio
-from app.models.indicador import (
-    IndicadorCNIS, ClassificacaoIndicador, SeveridadeIndicador,
-)
-from app.models.formulario import DadosFormulario
+try:
+    from app.models.pessoa import Pessoa, Sexo
+    from app.models.vinculo import Vinculo, TipoVinculo, SituacaoVinculo, AliquotaContribuicao
+    from app.models.contribuicao import Contribuicao, TipoContribuicao
+    from app.models.beneficio import Beneficio, EspecieBeneficio
+    from app.models.indicador import (
+        IndicadorCNIS, ClassificacaoIndicador, SeveridadeIndicador,
+    )
+    from app.models.formulario import DadosFormulario
+except ImportError:
+    from models.pessoa import Pessoa, Sexo
+    from models.vinculo import Vinculo, TipoVinculo, SituacaoVinculo, AliquotaContribuicao
+    from models.contribuicao import Contribuicao, TipoContribuicao
+    from models.beneficio import Beneficio, EspecieBeneficio
+    from models.indicador import (
+        IndicadorCNIS, ClassificacaoIndicador, SeveridadeIndicador,
+    )
+    from models.formulario import DadosFormulario
 
 from pydantic import BaseModel, Field
 
