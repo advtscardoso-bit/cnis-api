@@ -16,7 +16,7 @@ from decimal import Decimal
 from typing import Optional
 from pathlib import Path
 
-from config.constantes import (
+from config.constantes_cnis import (
     LACUNA_LIMIAR_DIAS,
     LACUNA_MESES_BAIXA,
     LACUNA_MESES_MEDIA,
