@@ -603,11 +603,16 @@ def _conclusao_perda_qualidade(nome: str, qualidade: dict) -> Optional[dict]:
 
 
 def _conclusao_pendencias(pendencias: list[dict], vinculos: list[dict]) -> Optional[dict]:
-    """Gera problema de pendências bloqueando períodos."""
+    """Gera problema de pendências bloqueando períodos.
+
+    Retorna estrutura com frase de abertura curta + `tabela_pendencias`
+    (lista de dicts) para o template renderizar como cards legíveis
+    em vez de um único parágrafo denso.
+    """
     if not pendencias:
         return None
 
-    detalhes_pend = []
+    tabela_pendencias = []
     for p in pendencias:
         vinculos_afetados = []
         for v in vinculos:
@@ -620,17 +625,31 @@ def _conclusao_pendencias(pendencias: list[dict], vinculos: list[dict]) -> Optio
                     )
         vinculos_afetados = list(set(vinculos_afetados))
         onde = '; '.join(vinculos_afetados[:5]) if vinculos_afetados else 'vínculo não identificado'
-        detalhes_pend.append(
-            f'{p["codigo"]} — {p["nome"]}: {p["descricao"]} '
-            f'Encontrado em: {onde}.'
-        )
 
-    lista_pend = ' '.join(detalhes_pend)
+        # Separa descrição do procedimento, quando a descrição trouxer
+        # a sentença "Procedimento: ..." (padrão da base de indicadores).
+        descricao_raw = p.get('descricao', '') or ''
+        descricao_limpa = descricao_raw
+        procedimento = ''
+        if 'Procedimento:' in descricao_raw:
+            partes = descricao_raw.split('Procedimento:', 1)
+            descricao_limpa = partes[0].strip().rstrip('.').strip()
+            procedimento = partes[1].strip()
+
+        tabela_pendencias.append({
+            'codigo': p['codigo'],
+            'nome': p['nome'],
+            'descricao': descricao_limpa,
+            'procedimento': procedimento,
+            'onde': onde,
+        })
+
     return {
         'problema': (
             f'Foram identificadas {len(pendencias)} pendência(s) no extrato que bloqueiam '
-            f'o cômputo de períodos contributivos: {lista_pend}'
+            f'o cômputo de períodos contributivos.'
         ),
+        'tabela_pendencias': tabela_pendencias,
         'impacto': (
             'Enquanto essas pendências não forem resolvidas, o INSS desconsiderará os '
             'períodos afetados no cálculo do tempo de contribuição e da carência. Isso pode '
@@ -641,7 +660,11 @@ def _conclusao_pendencias(pendencias: list[dict], vinculos: list[dict]) -> Optio
 
 
 def _conclusao_abaixo_minimo(abaixo_minimo: list[dict]) -> Optional[dict]:
-    """Gera problema de salários abaixo do mínimo."""
+    """Gera problema de salários abaixo do mínimo.
+
+    Retorna estrutura com frase curta + `tabela_abaixo_minimo` para
+    o template renderizar a quebra por empregador como tabela legível.
+    """
     if not abaixo_minimo:
         return None
 
@@ -652,20 +675,23 @@ def _conclusao_abaixo_minimo(abaixo_minimo: list[dict]) -> Optional[dict]:
             por_empregador[emp] = []
         por_empregador[emp].append(item)
 
-    detalhes_abaixo = []
+    tabela = []
     for emp, itens in por_empregador.items():
         comps = ', '.join([i['competencia'] for i in itens[:10]])
         if len(itens) > 10:
-            comps += f' e mais {len(itens) - 10} competência(s)'
-        detalhes_abaixo.append(f'{emp}: {len(itens)} competência(s) ({comps})')
+            comps += f' e mais {len(itens) - 10}'
+        tabela.append({
+            'empregador': emp,
+            'qtd': len(itens),
+            'competencias': comps,
+        })
 
-    lista_abaixo = '; '.join(detalhes_abaixo)
     return {
         'problema': (
             f'Foram identificadas {len(abaixo_minimo)} competência(s) com remuneração '
-            f'abaixo do salário mínimo vigente na época. Detalhamento por empregador: '
-            f'{lista_abaixo}.'
+            f'abaixo do salário mínimo vigente na época.'
         ),
+        'tabela_abaixo_minimo': tabela,
         'impacto': (
             'Contribuições abaixo do salário mínimo NÃO contam para carência e NÃO são '
             'computadas no tempo de contribuição. O(a) segurado(a) pode estar com menos '
@@ -747,21 +773,27 @@ def _conclusao_lacunas(lacunas_lista: list[dict]) -> Optional[dict]:
 
 
 def _conclusao_vinculos_sem_fim(vinculos_sem_fim: list[dict]) -> Optional[dict]:
-    """Gera problema de vínculos sem data de saída."""
+    """Gera problema de vínculos sem data de saída.
+
+    Retorna estrutura com frase curta + `tabela_vinculos_sem_fim` para
+    o template renderizar a lista de vínculos como tabela legível.
+    """
     if not vinculos_sem_fim:
         return None
 
-    detalhes_vsf = []
-    for vsf in vinculos_sem_fim:
-        detalhes_vsf.append(
-            f'{vsf["empregador"]} (início em {vsf["data_inicio"]})'
-        )
-    lista_vsf = '; '.join(detalhes_vsf)
+    tabela = [
+        {
+            'empregador': vsf.get('empregador', 'N/I'),
+            'data_inicio': vsf.get('data_inicio', ''),
+        }
+        for vsf in vinculos_sem_fim
+    ]
     return {
         'problema': (
             f'Foram identificados {len(vinculos_sem_fim)} vínculo(s) sem data de saída '
-            f'registrada no CNIS, mas com outro(s) vínculo(s) posterior(es): {lista_vsf}.'
+            f'registrada no CNIS, mas com outro(s) vínculo(s) posterior(es).'
         ),
+        'tabela_vinculos_sem_fim': tabela,
         'impacto': (
             'Nessa situação, o INSS não considera automaticamente o período do vínculo sem '
             'data de rescisão para fins previdenciários (contagem de tempo de contribuição e '
