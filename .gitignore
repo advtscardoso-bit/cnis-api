@@ -8,3 +8,6 @@ build/
 .env
 .venv/
 venv/
+
+# Backups locais de configs
+*.backup_*.json
