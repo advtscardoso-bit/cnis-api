@@ -539,7 +539,13 @@ def verificar_sobreposicoes(vinculos: list[dict]) -> list[dict]:
 
 
 def verificar_vinculos_sem_fim(vinculos: list[dict]) -> list[dict]:
-    """Identifica vínculos sem data fim que não sejam o mais recente."""
+    """Identifica vínculos sem data fim que têm outro vínculo posterior.
+
+    Esses vínculos precisam ser levados a acerto no CNIS (via Portal CNIS / Meu INSS)
+    para que o INSS considere o período corretamente para fins previdenciários.
+    Também marca `requer_acerto_cnis=True` no próprio vínculo (in-place)
+    para que o template possa destacar visualmente na tabela.
+    """
     anomalias = []
     vinculos_emprego = [
         v for v in vinculos
@@ -557,11 +563,17 @@ def verificar_vinculos_sem_fim(vinculos: list[dict]) -> list[dict]:
     # O último vínculo pode legitimamente não ter data fim (ativo)
     for v in vinculos_emprego[:-1]:
         if not v.get('data_fim'):
+            # Marca no próprio vínculo para o template destacar
+            v['requer_acerto_cnis'] = True
             anomalias.append({
                 'vinculo_seq': v['seq'],
                 'empregador': v.get('empregador', 'N/I'),
                 'data_inicio': v['data_inicio'],
-                'nota': 'Vínculo sem data de fim e não é o mais recente. Possível inconsistência.',
+                'nota': (
+                    'Vínculo sem data de fim possui outro vínculo posterior. '
+                    'Requer acerto do CNIS para que o INSS considere esse período '
+                    'de contribuição para fins previdenciários.'
+                ),
             })
 
     return anomalias
@@ -748,12 +760,21 @@ def _conclusao_vinculos_sem_fim(vinculos_sem_fim: list[dict]) -> Optional[dict]:
     return {
         'problema': (
             f'Foram identificados {len(vinculos_sem_fim)} vínculo(s) sem data de saída '
-            f'registrada no CNIS: {lista_vsf}.'
+            f'registrada no CNIS, mas com outro(s) vínculo(s) posterior(es): {lista_vsf}.'
         ),
         'impacto': (
-            'O INSS pode não ter o registro correto da rescisão, o que causa inconsistências '
-            'no cálculo do tempo de contribuição. Na hora de requerer a aposentadoria, o INSS '
-            'pode exigir a regularização antes de conceder o benefício, gerando atrasos.'
+            'Nessa situação, o INSS não considera automaticamente o período do vínculo sem '
+            'data de rescisão para fins previdenciários (contagem de tempo de contribuição e '
+            'carência). Como consta outro vínculo começando depois, presume-se que o anterior '
+            'deveria ter sido encerrado, e o INSS exige a regularização antes de computar o '
+            'período. Isso pode atrasar a aposentadoria e reduzir o tempo de contribuição '
+            'reconhecido.'
+        ),
+        'acao': (
+            'Solicitar ACERTO DO CNIS pelo Portal Meu INSS ou Portal CNIS para incluir a '
+            'data de rescisão correta do(s) vínculo(s) acima, anexando CTPS, TRCT ou outro '
+            'documento que comprove a data de saída. Sem esse acerto, o período não será '
+            'considerado pelo INSS para fins previdenciários.'
         ),
     }
 

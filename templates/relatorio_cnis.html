@@ -515,6 +515,21 @@ body {
 .situacao-ativo { color: #2e7d32; font-weight: 600; }
 .situacao-cessado { color: #b71c1c; }
 .situacao-indeferido { color: #e65100; }
+.situacao-alerta { color: #c77800; font-weight: 600; }
+.aviso-acerto-cnis {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 2px 8px;
+  background: #fff4e0;
+  color: #8a4a00;
+  border: 1px solid #e8b88a;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: 'Montserrat', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
 
 /* ============================================================
    PÁGINA 7 — ANÁLISE DE INDICADORES
@@ -1191,6 +1206,9 @@ body {
         <td>
           {% if vinculo.data_fim %}
           <span class="chip-data">{{ vinculo.data_fim }}</span>
+          {% elif vinculo.requer_acerto_cnis %}
+          <span class="situacao-alerta">Em aberto</span>
+          <div class="aviso-acerto-cnis">⚠ Requer acerto do CNIS</div>
           {% else %}
           <span class="situacao-ativo">Em aberto</span>
           {% endif %}
