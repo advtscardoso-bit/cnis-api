@@ -57,6 +57,24 @@ async def health():
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
 
 
+@app.get("/info")
+async def info():
+    """Retorna estatísticas da base de indicadores carregada no servidor.
+    Útil para confirmar se o deploy está com a versão mais recente."""
+    try:
+        from cnis_analyzer import carregar_indicadores
+        d = carregar_indicadores()
+        return {
+            "total": sum(len(v) for v in d.values()),
+            "por_categoria": {k: len(v) for k, v in d.items()},
+            "amostra_pendencia": list(d.get('PENDENCIAS', {}).keys())[:5],
+            "amostra_alerta": list(d.get('ALERTAS', {}).keys())[:5],
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        return {"erro": str(e)}
+
+
 @app.post("/analisar-cnis")
 async def analisar_cnis_endpoint(
     file: UploadFile = File(...),
