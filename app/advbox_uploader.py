@@ -10,9 +10,12 @@ A API pública /api/v1/posts NÃO suporta upload. Por isso usamos os endpoints w
 """
 from __future__ import annotations
 
+import email as email_mod
 import gzip
 import http.cookiejar
+import imaplib
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -51,9 +54,21 @@ class AdvboxClient:
 
     BASE = "https://app.advbox.com.br"
 
-    def __init__(self, email: str, password: str):
+    def __init__(
+        self,
+        email: str,
+        password: str,
+        imap_user: Optional[str] = None,
+        imap_password: Optional[str] = None,
+        imap_host: str = "imap.gmail.com",
+    ):
+        """Cliente ADVBOX. Se imap_user e imap_password forem fornecidos,
+        completa 2FA automaticamente lendo o código no email."""
         self.email = email
         self.password = password
+        self.imap_user = imap_user
+        self.imap_password = imap_password
+        self.imap_host = imap_host
         self.cj = http.cookiejar.CookieJar()
         self.opener = urllib.request.build_opener(
             urllib.request.HTTPCookieProcessor(self.cj)
@@ -132,15 +147,20 @@ class AdvboxClient:
 
         # 2FA?
         if "Autentica" in html or "two_factor" in html.lower():
-            raise AdvboxLoginError(
-                "2fa_required",
-                "ADVBOX exigiu 2FA. Faça login manual no painel pra renovar trust de 30 dias.",
-            )
-
-        title_m = re.search(r"<title>([^<]+)", html)
-        title = title_m.group(1).strip() if title_m else ""
-        if "Login" in title:
-            raise AdvboxLoginError("credentials", "Email/senha rejeitados pelo ADVBOX")
+            # Se tem credenciais IMAP, tenta completar 2FA via email automaticamente
+            if self.imap_user and self.imap_password:
+                self._complete_2fa_via_email(html)
+                # Após 2FA bem-sucedido, segue pra extrair CSRF da sessão (passo 3 abaixo)
+            else:
+                raise AdvboxLoginError(
+                    "2fa_required",
+                    "ADVBOX exigiu 2FA e ADVBOX_IMAP_USER/PASSWORD não configurados.",
+                )
+        else:
+            title_m = re.search(r"<title>([^<]+)", html)
+            title = title_m.group(1).strip() if title_m else ""
+            if "Login" in title:
+                raise AdvboxLoginError("credentials", "Email/senha rejeitados pelo ADVBOX")
 
         # 3) GET / -> CSRF da sessão autenticada (meta tag)
         status, _, body = self._request(f"{self.BASE}/")
@@ -153,6 +173,159 @@ class AdvboxClient:
             self.csrf = m.group(1)
         if not self.csrf:
             raise AdvboxLoginError("session_parse", "Meta tag csrf-token não encontrada após login")
+
+    # ------------------------------------------------------------------
+    #  2FA via email (IMAP)
+    # ------------------------------------------------------------------
+
+    def _complete_2fa_via_email(self, html_2fa_page: str) -> None:
+        """Lê a página de 2FA, dispara envio do código por email, lê IMAP, submete.
+
+        Lança AdvboxLoginError se algum passo falhar.
+        """
+        # Extrai os tokens da página de 2FA
+        m = re.search(r'<input[^>]*name=["\']token["\'][^>]*value=["\']([^"\']+)', html_2fa_page)
+        if not m:
+            raise AdvboxLoginError("2fa_required", "Não achei o token 2FA na página")
+        token_2fa = m.group(1)
+        m = re.search(r'<input[^>]*name=["\']_token["\'][^>]*value=["\']([^"\']+)', html_2fa_page)
+        if not m:
+            raise AdvboxLoginError("2fa_required", "Não achei o CSRF da página 2FA")
+        csrf_2fa = m.group(1)
+
+        # Marca o instante ANTES de pedir o código (pra ignorar emails antigos)
+        request_time = time.time()
+
+        # Solicita envio por email (POST /invite/validation)
+        form = urllib.parse.urlencode(
+            [
+                ("_token", csrf_2fa),
+                ("two_factor_type", "email"),
+                ("email", self.email),
+                ("ev__item", "two_factor"),
+                ("_device", ""),
+                ("token", token_2fa),
+            ]
+        ).encode()
+        status, _, body = self._request(
+            f"{self.BASE}/invite/validation",
+            data=form,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Referer": f"{self.BASE}/login",
+            },
+        )
+        if status != 200:
+            raise AdvboxLoginError(
+                "2fa_required",
+                f"POST /invite/validation retornou HTTP {status}",
+            )
+
+        # Lê o código no email (poll IMAP por até 60s)
+        code = self._poll_2fa_code(min_received_at=request_time, max_wait_sec=60)
+        if not code:
+            raise AdvboxLoginError(
+                "2fa_required",
+                "Não achei email do código 2FA em 60s. Verificar caixa de entrada.",
+            )
+
+        # Submete código via POST /login
+        form = urllib.parse.urlencode(
+            [
+                ("_token", csrf_2fa),
+                ("email", self.email),
+                ("password", self.password),
+                ("two_factor_code", code),
+                ("token", token_2fa),
+                ("_device", ""),
+            ]
+        ).encode()
+        status, _, body = self._request(
+            f"{self.BASE}/login",
+            data=form,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Referer": f"{self.BASE}/login",
+            },
+        )
+        html = body.decode("utf-8", "replace")
+        if "Autentica" in html or "two_factor" in html.lower():
+            raise AdvboxLoginError("2fa_required", "Código 2FA rejeitado pelo ADVBOX")
+        title_m = re.search(r"<title>([^<]+)", html)
+        title = title_m.group(1).strip() if title_m else ""
+        if "Login" in title:
+            raise AdvboxLoginError("2fa_required", "Sessão voltou pra login após 2FA")
+
+    def _poll_2fa_code(self, min_received_at: float, max_wait_sec: int = 60) -> Optional[str]:
+        """Conecta no Gmail via IMAP e procura código de 6 dígitos em email
+        do ADVBOX recebido após `min_received_at` (epoch seconds).
+        Retorna o código string ou None se não achar dentro do timeout.
+        """
+        deadline = time.time() + max_wait_sec
+        sleep_sec = 5
+        # ADVBOX pode demorar uns segundos pra mandar
+        time.sleep(8)
+        while time.time() < deadline:
+            try:
+                with imaplib.IMAP4_SSL(self.imap_host, 993) as M:
+                    M.login(self.imap_user, self.imap_password)
+                    M.select("INBOX")
+                    # Procura emails do ADVBOX (pode estar SEEN ou UNSEEN)
+                    typ, ids = M.search(None, '(FROM "no-reply@advboxmail.com.br")')
+                    if typ != "OK":
+                        time.sleep(sleep_sec)
+                        continue
+                    id_list = ids[0].split()
+                    if not id_list:
+                        time.sleep(sleep_sec)
+                        continue
+                    # Vai do mais recente pro mais antigo
+                    for msg_id in reversed(id_list[-10:]):  # checa últimos 10 emails
+                        typ, data = M.fetch(msg_id, "(RFC822)")
+                        if typ != "OK" or not data or not data[0]:
+                            continue
+                        raw = data[0][1]
+                        msg = email_mod.message_from_bytes(raw)
+                        date_str = msg.get("Date", "")
+                        try:
+                            msg_time = email_mod.utils.parsedate_to_datetime(date_str).timestamp()
+                        except Exception:
+                            msg_time = 0
+                        # Ignora emails recebidos ANTES da nossa requisição
+                        if msg_time < min_received_at - 30:
+                            continue
+                        # Extrai corpo
+                        body_text = ""
+                        if msg.is_multipart():
+                            for part in msg.walk():
+                                ct = part.get_content_type()
+                                if ct in ("text/plain", "text/html"):
+                                    payload = part.get_payload(decode=True)
+                                    if payload:
+                                        charset = part.get_content_charset() or "utf-8"
+                                        body_text += payload.decode(charset, errors="replace")
+                        else:
+                            payload = msg.get_payload(decode=True)
+                            if payload:
+                                body_text = payload.decode("utf-8", errors="replace")
+                        # Procura código de 6 dígitos
+                        # Estratégia: pega o primeiro 6-dig isolado depois de "código de validação"
+                        # ou só o primeiro 6-dig isolado
+                        m = re.search(
+                            r"(?:c[óo]digo[^0-9]*?)(\d{6})",
+                            body_text,
+                            re.IGNORECASE,
+                        )
+                        if not m:
+                            # Fallback: qualquer 6 dígitos isolados
+                            m = re.search(r"\b(\d{6})\b", body_text)
+                        if m:
+                            return m.group(1)
+            except Exception as e:
+                # Loga e continua tentando
+                print(f"IMAP poll error: {e}")
+            time.sleep(sleep_sec)
+        return None
 
     # ------------------------------------------------------------------
     #  Upload de arquivo (vai pra pasta temp)

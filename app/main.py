@@ -263,6 +263,8 @@ async def upload_to_advbox_endpoint(
 
     email = os.environ.get("ADVBOX_EMAIL")
     password = os.environ.get("ADVBOX_PASSWORD")
+    imap_user = os.environ.get("ADVBOX_IMAP_USER") or email
+    imap_password = os.environ.get("ADVBOX_IMAP_PASSWORD")
     if not email or not password:
         return JSONResponse(
             status_code=500,
@@ -273,7 +275,12 @@ async def upload_to_advbox_endpoint(
             },
         )
 
-    client = AdvboxClient(email, password)
+    client = AdvboxClient(
+        email=email,
+        password=password,
+        imap_user=imap_user if imap_password else None,
+        imap_password=imap_password,
+    )
     try:
         client.login()
     except AdvboxLoginError as e:
