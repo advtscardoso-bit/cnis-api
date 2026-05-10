@@ -13,13 +13,14 @@ import tempfile
 import traceback
 from datetime import datetime
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Header
+from fastapi import FastAPI, File, UploadFile, HTTPException, Header, Form
 from fastapi.responses import JSONResponse
 
 from cnis_parser import parse_cnis
 from cnis_analyzer import analisar_cnis
 from cnis_report_generator import gerar_html, gerar_pdf, gerar_nome_arquivo
 from cnis_docx_generator import gerar_docx, gerar_nome_arquivo_docx
+from advbox_uploader import AdvboxClient, AdvboxLoginError, AdvboxUploadError
 
 
 # ============================================================================
@@ -225,6 +226,98 @@ async def analisar_cnis_endpoint(
             pass
 
 
+@app.post("/upload-to-advbox")
+async def upload_to_advbox_endpoint(
+    pdf: UploadFile = File(...),
+    docx: UploadFile = File(None),
+    lawsuits_id: int = Form(...),
+    tasks_id: int = Form(...),
+    user_id: int = Form(...),
+    date: str = Form(...),
+    date_deadline: str = Form(""),
+    comments: str = Form(""),
+    x_api_key: str = Header(default=None),
+):
+    """Cria uma tarefa no ADVBOX com PDF (e opcionalmente DOCX) anexados.
+
+    Faz login programático no ADVBOX (usa env vars ADVBOX_EMAIL e ADVBOX_PASSWORD),
+    sobe os arquivos pra pasta temp do user, cria a tarefa e o ADVBOX auto-anexa.
+
+    Body (multipart/form-data):
+        pdf: arquivo PDF (obrigatório)
+        docx: arquivo DOCX (opcional)
+        lawsuits_id: ID do processo no ADVBOX
+        tasks_id: ID do template de tarefa (ex: 9097703 = ENTREGAR PARA O CLIENTE)
+        user_id: user_id do responsável (ex: 260801 = Cláudia)
+        date: data início no formato DD/MM/YYYY
+        date_deadline: prazo fatal DD/MM/YYYY (opcional)
+        comments: descrição da tarefa
+
+    Returns:
+        {sucesso: True, post_id: <int>}              -> 200
+        {sucesso: False, erro: "2fa_required", ...}  -> 403  (precisa renovar trust)
+        {sucesso: False, erro: "credentials", ...}   -> 401  (senha errada)
+        {sucesso: False, erro: "...", ...}           -> 500  (outro erro)
+    """
+    verificar_api_key(x_api_key)
+
+    email = os.environ.get("ADVBOX_EMAIL")
+    password = os.environ.get("ADVBOX_PASSWORD")
+    if not email or not password:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "sucesso": False,
+                "erro": "config",
+                "mensagem": "ADVBOX_EMAIL e ADVBOX_PASSWORD não configurados no servidor",
+            },
+        )
+
+    client = AdvboxClient(email, password)
+    try:
+        client.login()
+    except AdvboxLoginError as e:
+        status_code = 403 if e.code == "2fa_required" else 401
+        return JSONResponse(
+            status_code=status_code,
+            content={"sucesso": False, "erro": e.code, "mensagem": e.message},
+        )
+
+    try:
+        pdf_bytes = await pdf.read()
+        client.upload_file(pdf.filename, pdf_bytes, "application/pdf", user_id)
+
+        if docx is not None:
+            docx_bytes = await docx.read()
+            client.upload_file(
+                docx.filename,
+                docx_bytes,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                user_id,
+            )
+
+        post_id = client.create_post(
+            lawsuits_id=lawsuits_id,
+            tasks_id=tasks_id,
+            user_id=user_id,
+            date_br=date,
+            deadline_br=date_deadline,
+            comments=comments,
+        )
+        return {"sucesso": True, "post_id": post_id}
+    except AdvboxUploadError as e:
+        return JSONResponse(
+            status_code=500,
+            content={"sucesso": False, "erro": "upload_failed", "mensagem": str(e)},
+        )
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(
+            status_code=500,
+            content={"sucesso": False, "erro": "exception", "mensagem": str(e)},
+        )
+
+
 @app.get("/")
 async def root():
     """Rota raiz com informações da API."""
@@ -234,6 +327,7 @@ async def root():
         "escritorio": "Tatiana Sampaio Advocacia e Consultoria Jurídica",
         "endpoints": {
             "POST /analisar-cnis": "Envia PDF do CNIS e recebe análise + relatório PDF",
+            "POST /upload-to-advbox": "Anexa PDF/DOCX em uma tarefa do ADVBOX",
             "GET /health": "Health check",
         },
     }
