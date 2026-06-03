@@ -236,6 +236,7 @@ async def upload_to_advbox_endpoint(
     date: str = Form(...),
     date_deadline: str = Form(""),
     comments: str = Form(""),
+    guests_id: int = Form(None),
     x_api_key: str = Header(default=None),
 ):
     """Cria uma tarefa no ADVBOX com PDF (e opcionalmente DOCX) anexados.
@@ -248,7 +249,8 @@ async def upload_to_advbox_endpoint(
         docx: arquivo DOCX (opcional)
         lawsuits_id: ID do processo no ADVBOX
         tasks_id: ID do template de tarefa (ex: 9097703 = ENTREGAR PARA O CLIENTE)
-        user_id: user_id do responsável (ex: 260801 = Cláudia)
+        user_id: dono da pasta temp dos anexos (ex: 260801 = Cláudia, sessão automatizada)
+        guests_id: responsável atribuído da tarefa (ex: 84870 = Danieli). Se omitido, usa user_id.
         date: data início no formato DD/MM/YYYY
         date_deadline: prazo fatal DD/MM/YYYY (opcional)
         comments: descrição da tarefa
@@ -310,6 +312,7 @@ async def upload_to_advbox_endpoint(
             date_br=date,
             deadline_br=date_deadline,
             comments=comments,
+            guests_id=guests_id,
         )
         return {"sucesso": True, "post_id": post_id}
     except AdvboxUploadError as e:

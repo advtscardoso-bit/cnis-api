@@ -392,20 +392,26 @@ class AdvboxClient:
         date_br: str,           # DD/MM/YYYY
         deadline_br: str,        # DD/MM/YYYY (pode ser "" se sem prazo)
         comments: str,
+        guests_id: Optional[int] = None,
     ) -> Optional[int]:
         """Cria nova tarefa. Files na pasta temp/{user_id} são auto-anexados.
+
+        user_id: dono da pasta temp dos anexos (precisa bater com a sessão logada).
+        guests_id: responsável atribuído (assignee). Se None, usa user_id.
 
         Retorna o post_id criado (ou None se não conseguir parsear).
         """
         if not self.csrf:
             raise AdvboxUploadError("Cliente não autenticado (chame login() antes)")
 
+        assignee = guests_id if guests_id is not None else user_id
+
         fields = [
             ("_token", self.csrf),
             ("lawsuits_id", str(lawsuits_id)),
             ("user", ""),
             ("squad", ""),
-            ("guests[]", str(user_id)),
+            ("guests[]", str(assignee)),
             ("has_partner", "0"),
             ("tasks_id", str(tasks_id)),
             ("workflow_id", "0"),
