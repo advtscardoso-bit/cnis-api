@@ -10,8 +10,11 @@ import base64
 import json
 import os
 import tempfile
+import threading
+import time
 import traceback
 from datetime import datetime
+from typing import Optional
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Header, Form
 from fastapi.responses import JSONResponse
@@ -21,6 +24,55 @@ from cnis_analyzer import analisar_cnis
 from cnis_report_generator import gerar_html, gerar_pdf, gerar_nome_arquivo
 from cnis_docx_generator import gerar_docx, gerar_nome_arquivo_docx
 from advbox_uploader import AdvboxClient, AdvboxLoginError, AdvboxUploadError
+
+
+# ============================================================================
+#  CACHE DE SESSAO ADVBOX
+#  Evita login a cada /upload-to-advbox: reusa cookies por ate 4h.
+#  Em caso de falha de upload com sessao cacheada, drop+retry com login fresco.
+# ============================================================================
+
+_ADVBOX_TTL_SEC = 4 * 3600
+_advbox_lock = threading.Lock()
+_advbox_client: Optional[AdvboxClient] = None
+_advbox_logged_at: float = 0.0
+
+
+def _get_advbox_client(force_refresh: bool = False) -> AdvboxClient:
+    """Devolve cliente ADVBOX autenticado, reusando sessao se ainda no TTL.
+
+    Raises AdvboxLoginError se login falhar.
+    """
+    global _advbox_client, _advbox_logged_at
+    with _advbox_lock:
+        fresh_enough = (time.time() - _advbox_logged_at) < _ADVBOX_TTL_SEC
+        if _advbox_client is not None and fresh_enough and not force_refresh:
+            return _advbox_client
+
+        email = os.environ.get("ADVBOX_EMAIL")
+        password = os.environ.get("ADVBOX_PASSWORD")
+        imap_user = os.environ.get("ADVBOX_IMAP_USER") or email
+        imap_password = os.environ.get("ADVBOX_IMAP_PASSWORD")
+        if not email or not password:
+            raise AdvboxLoginError("config", "ADVBOX_EMAIL/ADVBOX_PASSWORD nao configurados")
+
+        client = AdvboxClient(
+            email=email,
+            password=password,
+            imap_user=imap_user if imap_password else None,
+            imap_password=imap_password,
+        )
+        client.login()
+        _advbox_client = client
+        _advbox_logged_at = time.time()
+        return client
+
+
+def _invalidate_advbox_cache() -> None:
+    global _advbox_client, _advbox_logged_at
+    with _advbox_lock:
+        _advbox_client = None
+        _advbox_logged_at = 0.0
 
 
 # ============================================================================
@@ -277,35 +329,20 @@ async def upload_to_advbox_endpoint(
             },
         )
 
-    client = AdvboxClient(
-        email=email,
-        password=password,
-        imap_user=imap_user if imap_password else None,
-        imap_password=imap_password,
-    )
-    try:
-        client.login()
-    except AdvboxLoginError as e:
-        status_code = 403 if e.code == "2fa_required" else 401
-        return JSONResponse(
-            status_code=status_code,
-            content={"sucesso": False, "erro": e.code, "mensagem": e.message},
-        )
+    pdf_bytes = await pdf.read()
+    docx_bytes = await docx.read() if docx is not None else None
+    docx_filename = docx.filename if docx is not None else None
 
-    try:
-        pdf_bytes = await pdf.read()
+    def _do_upload(client: AdvboxClient) -> Optional[int]:
         client.upload_file(pdf.filename, pdf_bytes, "application/pdf", user_id)
-
-        if docx is not None:
-            docx_bytes = await docx.read()
+        if docx_bytes is not None:
             client.upload_file(
-                docx.filename,
+                docx_filename,
                 docx_bytes,
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 user_id,
             )
-
-        post_id = client.create_post(
+        return client.create_post(
             lawsuits_id=lawsuits_id,
             tasks_id=tasks_id,
             user_id=user_id,
@@ -314,18 +351,35 @@ async def upload_to_advbox_endpoint(
             comments=comments,
             guests_id=guests_id,
         )
-        return {"sucesso": True, "post_id": post_id}
-    except AdvboxUploadError as e:
-        return JSONResponse(
-            status_code=500,
-            content={"sucesso": False, "erro": "upload_failed", "mensagem": str(e)},
-        )
-    except Exception as e:
-        traceback.print_exc()
-        return JSONResponse(
-            status_code=500,
-            content={"sucesso": False, "erro": "exception", "mensagem": str(e)},
-        )
+
+    last_err: Optional[Exception] = None
+    for attempt in (1, 2):
+        try:
+            client = _get_advbox_client(force_refresh=(attempt == 2))
+        except AdvboxLoginError as e:
+            status_code = 403 if e.code == "2fa_required" else 401
+            return JSONResponse(
+                status_code=status_code,
+                content={"sucesso": False, "erro": e.code, "mensagem": e.message},
+            )
+        try:
+            post_id = _do_upload(client)
+            return {"sucesso": True, "post_id": post_id}
+        except AdvboxUploadError as e:
+            last_err = e
+            _invalidate_advbox_cache()  # provavel sessao expirada — retry com login fresco
+            continue
+        except Exception as e:
+            traceback.print_exc()
+            return JSONResponse(
+                status_code=500,
+                content={"sucesso": False, "erro": "exception", "mensagem": str(e)},
+            )
+
+    return JSONResponse(
+        status_code=500,
+        content={"sucesso": False, "erro": "upload_failed", "mensagem": str(last_err)},
+    )
 
 
 @app.get("/")
