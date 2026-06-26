@@ -199,9 +199,14 @@ def parse_data_str(data_str: str) -> Optional[date]:
 
 
 def calcular_lacunas(vinculos: list[dict]) -> list[dict]:
-    """Calcula lacunas entre vínculos consecutivos.
+    """Calcula lacunas reais — gaps na UNIÃO dos períodos contributivos.
 
-    Ordena vínculos por data_inicio e calcula intervalos.
+    Sprint 2: antes a função iterava vínculos consecutivos por ordem de
+    `data_inicio`, o que produzia lacunas falsas em históricos com vínculos
+    paralelos (ex.: Beltrão com 3 empregos simultâneos a partir de 14/03/1983).
+    Agora faz UNIÃO dos intervalos primeiro — assim o gap só é detectado se
+    não houver NENHUM vínculo cobrindo o período.
+
     Classificação de gravidade:
       Baixa: ≤ 3 meses
       Média: 4 a 12 meses
@@ -216,16 +221,31 @@ def calcular_lacunas(vinculos: list[dict]) -> list[dict]:
         and v.get('data_fim')
     ]
 
-    # Ordenar por data de início
+    # Ordenar por data de início (auxiliar) e construir tuplas (ini, fim, vinc)
     vinculos_emprego.sort(key=lambda v: parse_data_str(v['data_inicio']) or date.min)
+    intervalos_v: list[tuple[date, date, dict]] = []
+    for v in vinculos_emprego:
+        di = parse_data_str(v['data_inicio'])
+        df = parse_data_str(v['data_fim'])
+        if di and df and di <= df:
+            intervalos_v.append((di, df, v))
+
+    # União de intervalos com referência ao vínculo terminal de cada bloco
+    unidos: list[tuple[date, date, dict, dict]] = []  # (ini, fim, v_inicio, v_fim)
+    for di, df, v in intervalos_v:
+        if unidos and di <= unidos[-1][1]:
+            ult = unidos[-1]
+            if df > ult[1]:
+                unidos[-1] = (ult[0], df, ult[2], v)
+        else:
+            unidos.append((di, df, v, v))
 
     lacunas = []
-    for i in range(len(vinculos_emprego) - 1):
-        data_fim_atual = parse_data_str(vinculos_emprego[i]['data_fim'])
-        data_inicio_prox = parse_data_str(vinculos_emprego[i + 1]['data_inicio'])
-
-        if not data_fim_atual or not data_inicio_prox:
-            continue
+    for i in range(len(unidos) - 1):
+        data_fim_atual = unidos[i][1]
+        data_inicio_prox = unidos[i + 1][0]
+        v_anterior = unidos[i][3]
+        v_posterior = unidos[i + 1][2]
 
         # Calcular diferença em meses
         diff_dias = (data_inicio_prox - data_fim_atual).days
@@ -245,12 +265,12 @@ def calcular_lacunas(vinculos: list[dict]) -> list[dict]:
             gravidade = 'CRITICA'
 
         lacunas.append({
-            'vinculo_anterior': vinculos_emprego[i]['seq'],
-            'vinculo_posterior': vinculos_emprego[i + 1]['seq'],
-            'empregador_anterior': vinculos_emprego[i].get('empregador', 'N/I'),
-            'empregador_posterior': vinculos_emprego[i + 1].get('empregador', 'N/I'),
-            'data_fim': vinculos_emprego[i]['data_fim'],
-            'data_inicio': vinculos_emprego[i + 1]['data_inicio'],
+            'vinculo_anterior': v_anterior['seq'],
+            'vinculo_posterior': v_posterior['seq'],
+            'empregador_anterior': v_anterior.get('empregador', 'N/I'),
+            'empregador_posterior': v_posterior.get('empregador', 'N/I'),
+            'data_fim': v_anterior['data_fim'],
+            'data_inicio': v_posterior['data_inicio'],
             'dias': diff_dias,
             'meses': meses,
             'anos_meses': f"{meses // 12} ano(s) e {meses % 12} mês(es)" if meses >= 12 else f"{meses} mês(es)",
@@ -417,9 +437,59 @@ def analisar_remuneracoes(vinculos: list[dict], tabela_sm: list[dict], serie_inp
                             item['salario_minimo_corrigido'] = sm_corr
                     abaixo_minimo.append(item)
 
-    # Recortes por indicador oficial (PSC-MEN-SM-EC103 vs PREC-MENOR-MIN)
-    psc_men_sm = [x for x in abaixo_minimo if x['indicador_oficial'] == 'PSC-MEN-SM-EC103']
-    prec_menor = [x for x in abaixo_minimo if x['indicador_oficial'] == 'PREC-MENOR-MIN']
+    # ------------------------------------------------------------------
+    # Recortes PSC-MEN-SM-EC103 vs PREC-MENOR-MIN
+    # ------------------------------------------------------------------
+    # Sprint 1 derivava esses recortes do conjunto abaixo_minimo (cálculo
+    # próprio do analyzer, SC < SM e NÃO proporcional). Mas o INSS marca o
+    # indicador PSC-MEN-SM-EC103 também em competências PROPORCIONAIS de
+    # mês de admissão/rescisão. Por isso, em casos como Maria Aparecida, a
+    # contagem do CJ (4 PSC) ficava maior que a nossa (1 PSC).
+    #
+    # Solução Sprint 2: popular essas listas a partir dos INDICADORES já
+    # extraídos pelo parser para cada remuneração (rem['indicadores']),
+    # garantindo paridade com o que está oficialmente no CNIS. Mantém
+    # abaixo_minimo, proporcionais e moeda_antiga como cálculos próprios
+    # para outras seções do relatório.
+    psc_men_sm: list[dict] = []
+    prec_menor: list[dict] = []
+    for vinculo in vinculos:
+        if vinculo.get('eh_beneficio'):
+            continue
+        tipo_v = _classificar_tipo_competencia(vinculo.get('tipo', ''))
+        for rem in vinculo.get('remuneracoes', []):
+            inds = set(rem.get('indicadores', []))
+            comp = rem.get('competencia')
+            valor = rem.get('valor')
+            if not comp:
+                continue
+
+            sm = obter_salario_minimo(comp, tabela_sm) or 0.0
+            base = {
+                'competencia': comp,
+                'valor': valor,
+                'salario_minimo': sm,
+                'vinculo_seq': vinculo.get('seq'),
+                'empregador': vinculo.get('empregador', 'N/I'),
+                'tipo_competencia': tipo_v,
+            }
+            if serie_inpc and valor is not None:
+                vc = corrigir_valor_inpc(valor, comp, serie_inpc)
+                if vc is not None:
+                    base['valor_corrigido'] = vc
+                if sm:
+                    sm_corr = corrigir_valor_inpc(sm, comp, serie_inpc)
+                    if sm_corr is not None:
+                        base['salario_minimo_corrigido'] = sm_corr
+
+            if 'PSC-MEN-SM-EC103' in inds:
+                item = dict(base)
+                item['indicador_oficial'] = 'PSC-MEN-SM-EC103'
+                psc_men_sm.append(item)
+            if 'PREC-MENOR-MIN' in inds:
+                item = dict(base)
+                item['indicador_oficial'] = 'PREC-MENOR-MIN'
+                prec_menor.append(item)
 
     return {
         'total_competencias_analisadas': total_competencias,
@@ -429,7 +499,7 @@ def analisar_remuneracoes(vinculos: list[dict], tabela_sm: list[dict], serie_inp
         'total_abaixo_minimo': len(abaixo_minimo),
         'total_proporcionais': len(proporcionais),
         'total_moeda_antiga': len(moeda_antiga),
-        # Recortes granulares por indicador oficial INSS
+        # Recortes granulares por indicador oficial INSS extraído do CNIS
         'psc_men_sm_ec103': psc_men_sm,
         'prec_menor_min': prec_menor,
         'total_psc_men_sm_ec103': len(psc_men_sm),
@@ -636,6 +706,74 @@ def _unir_intervalos(intervalos: list[tuple[date, date]]) -> list[tuple[date, da
         else:
             out.append((ini, fim))
     return out
+
+
+def detectar_avisos_beneficios(vinculos: list[dict]) -> list[dict]:
+    """Sprint 2: gera avisos no topo do PDF para benefícios presentes no CNIS.
+
+    Padrões reconhecidos:
+      - Pensão por morte (espécie 21) → benefício de dependente, não deve
+        contar no cálculo de outro benefício próprio do segurado.
+      - Aposentadoria por Tempo de Contribuição (espécie 42) — se ATIVA,
+        indica que o segurado já está aposentado; se INDEFERIDA, registra
+        tentativa recente.
+      - Auxílio-Doença (espécie 31) INDEFERIDO — sinaliza problema
+        pendente em incapacidade temporária.
+    """
+    avisos = []
+    for v in vinculos:
+        if not v.get('eh_beneficio'):
+            continue
+        especie = (v.get('especie_beneficio') or '').upper()
+        situacao = (v.get('situacao_beneficio') or '').upper()
+        nb = v.get('numero_beneficio') or 'N/I'
+
+        if 'PENSAO POR MORTE' in especie or especie.startswith('21'):
+            avisos.append({
+                'tipo': 'PENSAO_POR_MORTE',
+                'severidade': 'AVISO',
+                'titulo': 'Há uma pensão por morte no CNIS importado.',
+                'mensagem': (
+                    'A pensão por morte é benefício de dependente — não deve ser '
+                    f'considerada no cálculo de outro benefício do(a) próprio(a) segurado(a). '
+                    f'NB {nb}, situação {situacao or "não informada"}.'
+                ),
+            })
+        elif 'TEMPO DE CONTRIBU' in especie or especie.startswith('42'):
+            if 'ATIVO' in situacao:
+                avisos.append({
+                    'tipo': 'APOSENTADORIA_ATIVA',
+                    'severidade': 'INFO',
+                    'titulo': 'Aposentadoria por Tempo de Contribuição ATIVA no CNIS.',
+                    'mensagem': (
+                        f'O(a) segurado(a) já está recebendo Aposentadoria por Tempo '
+                        f'de Contribuição (NB {nb}). Para análise de outro benefício, '
+                        'verificar regras de acumulação aplicáveis.'
+                    ),
+                })
+            elif 'INDEFERIDO' in situacao:
+                avisos.append({
+                    'tipo': 'APOSENTADORIA_INDEFERIDA',
+                    'severidade': 'AVISO',
+                    'titulo': 'Pedido de Aposentadoria por Tempo de Contribuição INDEFERIDO.',
+                    'mensagem': (
+                        f'Há um pedido de aposentadoria por tempo de contribuição '
+                        f'INDEFERIDO no CNIS (NB {nb}). Avaliar motivos do indeferimento '
+                        'e cabimento de recurso administrativo ou novo requerimento.'
+                    ),
+                })
+        elif 'AUXILIO DOENCA' in especie or especie.startswith('31'):
+            if 'INDEFERIDO' in situacao:
+                avisos.append({
+                    'tipo': 'AUXILIO_DOENCA_INDEFERIDO',
+                    'severidade': 'AVISO',
+                    'titulo': 'Pedido de Auxílio-Doença INDEFERIDO no CNIS.',
+                    'mensagem': (
+                        f'Há um pedido de auxílio-doença INDEFERIDO (NB {nb}). '
+                        'Avaliar histórico médico e cabimento de recurso ou novo pedido.'
+                    ),
+                })
+    return avisos
 
 
 def estimar_tempo_contribuicao(vinculos: list[dict]) -> dict:
@@ -901,32 +1039,41 @@ def _agrupar_por_empregador(itens: list[dict]) -> list[dict]:
     return out
 
 
-def _conclusao_abaixo_minimo(abaixo_minimo: list[dict]) -> Optional[dict]:
+def _conclusao_abaixo_minimo(
+    abaixo_minimo: list[dict],
+    psc_men_sm: Optional[list[dict]] = None,
+    prec_menor: Optional[list[dict]] = None,
+) -> Optional[dict]:
     """Gera problema de salários abaixo do mínimo.
 
-    Separa em dois blocos conforme o indicador oficial INSS:
-      - PSC-MEN-SM-EC103: competências a partir de 11/2019 (passíveis de
-        complementação via Art. 29 EC 103, procedimento normatizado no Meu INSS).
-      - PREC-MENOR-MIN: competências anteriores a 11/2019 (tratamento caso a caso).
-
-    Cada item também traz `tipo_competencia` ('Recolhimento' ou 'Remuneração')
-    pra distinguir contribuição de CI/MEI/Facultativo (Recolhimento) vs CLT
-    (Remuneração).
+    Sprint 2: PSC-MEN-SM-EC103 e PREC-MENOR-MIN agora vêm prontos dos
+    indicadores extraídos pelo parser (mais fiel ao CNIS), não do recorte
+    abaixo_minimo. Mantemos o cálculo próprio (`abaixo_minimo`) como
+    sinalização adicional de qualidade de contribuição.
     """
-    if not abaixo_minimo:
+    psc = psc_men_sm if psc_men_sm is not None else (
+        [x for x in (abaixo_minimo or []) if x.get('indicador_oficial') == 'PSC-MEN-SM-EC103']
+    )
+    prec = prec_menor if prec_menor is not None else (
+        [x for x in (abaixo_minimo or []) if x.get('indicador_oficial') == 'PREC-MENOR-MIN']
+    )
+
+    if not abaixo_minimo and not psc and not prec:
         return None
 
-    psc = [x for x in abaixo_minimo if x.get('indicador_oficial') == 'PSC-MEN-SM-EC103']
-    prec = [x for x in abaixo_minimo if x.get('indicador_oficial') == 'PREC-MENOR-MIN']
+    total = len(set(
+        (x.get('vinculo_seq'), x.get('competencia'))
+        for x in (abaixo_minimo or []) + psc + prec
+    ))
 
     return {
         'problema': (
-            f'Foram identificadas {len(abaixo_minimo)} competência(s) com salário de '
+            f'Foram identificadas {total} competência(s) com salário de '
             f'contribuição abaixo do mínimo vigente na época, classificadas em dois '
             f'indicadores oficiais do INSS conforme a data.'
         ),
         # Mantém chave legada pra retrocompatibilidade do template
-        'tabela_abaixo_minimo': _agrupar_por_empregador(abaixo_minimo),
+        'tabela_abaixo_minimo': _agrupar_por_empregador(abaixo_minimo or []),
         # Recortes novos
         'tabela_psc_men_sm_ec103': _agrupar_por_empregador(psc),
         'tabela_prec_menor_min': _agrupar_por_empregador(prec),
@@ -1174,7 +1321,11 @@ def gerar_conclusao(cabecalho, qualidade, indicadores_info, lacunas_info,
     detectores = [
         _conclusao_perda_qualidade(nome, qualidade),
         _conclusao_pendencias(indicadores_info.get('pendencias', []), vinculos),
-        _conclusao_abaixo_minimo(remuneracoes_info.get('abaixo_minimo', [])),
+        _conclusao_abaixo_minimo(
+            remuneracoes_info.get('abaixo_minimo', []),
+            psc_men_sm=remuneracoes_info.get('psc_men_sm_ec103'),
+            prec_menor=remuneracoes_info.get('prec_menor_min'),
+        ),
         _conclusao_mei_simplificado(indicadores_info, vinculos),
         _conclusao_lacunas(lacunas_info.get('lista', [])),
         _conclusao_vinculos_sem_fim(verificacoes_info.get('vinculos_sem_fim', [])),
@@ -1287,6 +1438,9 @@ def analisar_cnis(dados_parser: dict) -> dict:
                 'descricao': f'{anos} anos, {meses_idade} meses e {dias_idade} dias',
             }
 
+    # 7.1 Avisos sobre benefícios presentes no CNIS (Sprint 2 #D)
+    avisos_beneficios = detectar_avisos_beneficios(vinculos)
+
     # 8. Gerar conclusão detalhada
     conclusao = gerar_conclusao(
         cabecalho=cabecalho,
@@ -1323,6 +1477,7 @@ def analisar_cnis(dados_parser: dict) -> dict:
         'idade': idade,
         'qualidade_segurado': qualidade,
         'tempo_contribuicao': tempo,
+        'avisos_beneficios': avisos_beneficios,
         'vinculos': vinculos,
         'indicadores': {
             'todos': indicadores_classificados,

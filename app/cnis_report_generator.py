@@ -63,6 +63,7 @@ def gerar_html(dados_analise: dict) -> str:
         'idade': dados_analise.get('idade'),
         'qualidade_segurado': dados_analise.get('qualidade_segurado', {}),
         'tempo_contribuicao': dados_analise.get('tempo_contribuicao', {}),
+        'avisos_beneficios': dados_analise.get('avisos_beneficios', []),
         'vinculos': dados_analise.get('vinculos', []),
         'indicadores': dados_analise.get('indicadores', {}),
         'lacunas': dados_analise.get('lacunas', {}),

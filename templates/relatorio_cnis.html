@@ -1163,6 +1163,16 @@ body {
   <div class="dados-faixa-nome">
     <span>{{ cabecalho.nome or 'NOME NÃO IDENTIFICADO' }}</span>
   </div>
+  {% if avisos_beneficios %}
+  <div style="margin: 16px 0 22px; display: flex; flex-direction: column; gap: 10px;">
+    {% for aviso in avisos_beneficios %}
+    <div style="padding: 12px 18px; border-radius: 6px; border-left: 5px solid {% if aviso.severidade == 'AVISO' %}#dd6b20{% else %}#3182ce{% endif %}; background: {% if aviso.severidade == 'AVISO' %}#fffaf0{% else %}#ebf8ff{% endif %};">
+      <div style="font-weight: 600; color: {% if aviso.severidade == 'AVISO' %}#7b341e{% else %}#2c5282{% endif %}; font-size: 12px; margin-bottom: 4px;">⚠ {{ aviso.titulo }}</div>
+      <div style="color: #2d3748; font-size: 11px; line-height: 1.5;">{{ aviso.mensagem }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
   <div class="dados-cards">
     <div class="dados-card">
       <div class="dados-card-label">Data de nascimento</div>

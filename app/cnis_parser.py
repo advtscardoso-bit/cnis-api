@@ -292,20 +292,36 @@ def parse_bloco_vinculo(bloco_texto: str, seq: int) -> dict:
     if len(datas) >= 2:
         vinculo['data_fim'] = datas[1]
 
-    # Verificar se é benefício (NB = número do benefício)
+    # Verificar se é benefício. O texto extraído pode conter:
+    #   1) "NB <10 dígitos>" — formato clássico
+    #   2) "Benefício <espécie> - <descrição> <status> - <STATUS>" — formato
+    #      compactado nas linhas de benefício do CNIS recente, sem rótulo NB.
     m_nb = re.search(r'NB[:\s]*(\d{10})', bloco_texto)
-    if m_nb:
+    m_ben = re.search(
+        r'Benef[ií]cio\s+(\d{2})\s*-\s*([A-ZÁÀÂÃÉÈÊÍÏÓÔÕÖÚÇÑ\s/]+?)\s+(\d{1,3})\s*-\s*([A-ZÁÉÍÓÚÊÔÇ]+)',
+        bloco_texto,
+    )
+    if m_nb or m_ben:
         vinculo['eh_beneficio'] = True
-        vinculo['numero_beneficio'] = m_nb.group(1)
-        # Espécie do benefício
-        m_esp = re.search(r'(\d{2})\s*-\s*([A-ZÁÀÂÃÉÈÊÍÏÓÔÕÖÚÇÑ\s]+)', bloco_texto)
-        if m_esp:
-            vinculo['especie_beneficio'] = f"{m_esp.group(1)} - {m_esp.group(2).strip()}"
-        # Situação
-        for sit in ['ATIVO', 'CESSADO', 'INDEFERIDO', 'SUSPENSO']:
-            if sit in bloco_texto.upper():
-                vinculo['situacao_beneficio'] = sit
-                break
+        if m_nb:
+            vinculo['numero_beneficio'] = m_nb.group(1)
+        else:
+            # Tenta capturar o número (sequência de 10 dígitos) em qualquer lugar do bloco
+            m_num = re.search(r'\b(\d{10})\b', bloco_texto)
+            if m_num:
+                vinculo['numero_beneficio'] = m_num.group(1)
+        if m_ben:
+            vinculo['especie_beneficio'] = f"{m_ben.group(1)} - {m_ben.group(2).strip()}"
+            vinculo['situacao_beneficio'] = m_ben.group(4).strip()
+        else:
+            # Fallback: regex original
+            m_esp = re.search(r'(\d{2})\s*-\s*([A-ZÁÀÂÃÉÈÊÍÏÓÔÕÖÚÇÑ\s]+)', bloco_texto)
+            if m_esp:
+                vinculo['especie_beneficio'] = f"{m_esp.group(1)} - {m_esp.group(2).strip()}"
+            for sit in ['ATIVO', 'CESSADO', 'INDEFERIDO', 'SUSPENSO']:
+                if sit in bloco_texto.upper():
+                    vinculo['situacao_beneficio'] = sit
+                    break
 
     # Extrair empregador (heurística: primeira linha longa após o seq)
     for linha in linhas:
@@ -340,25 +356,59 @@ def parse_bloco_vinculo(bloco_texto: str, seq: int) -> dict:
     return vinculo
 
 
+RE_COMP_MARK = re.compile(r'\b(\d{2}/\d{4})\b')
+RE_VALOR_MARK = re.compile(r'\b([\d]{1,3}(?:\.[\d]{3})*,[\d]{2})\b')
+
+
 def parse_remuneracoes_bloco(bloco_texto: str) -> list[dict]:
-    """Extrai remunerações (competência + valor + indicadores) de um bloco."""
+    """Extrai remunerações (competência + valor + indicadores) de um bloco.
+
+    Linhas do CNIS podem conter:
+
+      - Layout simples (1 coluna):
+          02/2020 33.641.663/0001-44 33.641.663/0001-44 Normal 123,55 PSC-MEN-SM-EC103
+      - Layout multi-coluna (2 a 3 competências por linha):
+          04/1993 7.935.992,06 05/1993 8.424.967,55 06/1993 12.663.993,34
+          10/2001 3.750,47 11/2001 4.002,30 PREM-FVIN 12/2001 4.496,98 PREM-FVIN
+
+    Estratégia de pareamento posicional:
+      1) Localiza todas as posições de competência (MM/YYYY) na linha.
+      2) Localiza todas as posições de valor monetário.
+      3) Para cada competência, escolhe o 1º valor À DIREITA da posição da
+         competência E ANTES da próxima competência (se houver).
+      4) O trecho entre o fim do valor e o início da próxima competência (ou
+         fim da linha) é onde caçamos indicadores aplicados àquela competência.
+
+    Esse algoritmo lida tanto com texto intermediário (CNPJ, "Normal", etc.)
+    quanto com múltiplas colunas na mesma linha.
+    """
     remuneracoes = []
     linhas = bloco_texto.split('\n')
 
     for linha in linhas:
-        # Procurar padrão: MM/AAAA seguido de valor
-        m_comp = RE_COMPETENCIA.search(linha)
-        m_valor = RE_VALOR_MONETARIO.search(linha)
+        comps = list(RE_COMP_MARK.finditer(linha))
+        if not comps:
+            continue
+        valores = list(RE_VALOR_MARK.finditer(linha))
 
-        if m_comp and m_valor:
+        for i, m_comp in enumerate(comps):
+            ini_comp = m_comp.start()
+            # Próxima competência limita o range desta
+            limite = comps[i + 1].start() if i + 1 < len(comps) else len(linha)
+
+            # 1º valor à direita da competência e antes do limite
+            m_val = next(
+                (v for v in valores if v.start() > m_comp.end() and v.end() <= limite),
+                None,
+            )
+            if not m_val:
+                continue
+
             competencia = m_comp.group(1)
-            valor = converter_valor(m_valor.group(1))
-
-            # Indicadores na mesma linha (após o valor)
-            # Pegar texto após o valor
-            pos_valor_fim = m_valor.end()
-            resto = linha[pos_valor_fim:]
-            indicadores = extrair_indicadores_linha(resto)
+            valor = converter_valor(m_val.group(1))
+            # Trecho de indicadores: do fim do valor ao próximo limite
+            trecho = linha[m_val.end():limite]
+            indicadores = extrair_indicadores_linha(trecho)
 
             remuneracoes.append({
                 'competencia': competencia,
@@ -479,8 +529,15 @@ def parse_cnis(pdf_path: str) -> dict:
     # 3. Extrair legenda de indicadores do CNIS (fonte oficial)
     legenda_indicadores = extrair_legenda_indicadores(texto_limpo)
 
+    # 3.1 Cortar o trecho a partir do bloco "Legenda de Indicadores":
+    # ele descreve cada indicador 1 vez, o que adicionaria N falsas
+    # ocorrências (vimos isso nos 3 testes: parser pegava N+1 do que CJ).
+    # Tudo que vem depois da legenda é apenas glossário/rodapé do CNIS.
+    m_legenda = re.search(r'Legenda\s+de\s+[Ii]ndicadores', texto_limpo)
+    texto_uteis = texto_limpo[:m_legenda.start()] if m_legenda else texto_limpo
+
     # 4. Segmentar e parsear vínculos
-    blocos = segmentar_vinculos(texto_limpo)
+    blocos = segmentar_vinculos(texto_uteis)
     vinculos = []
     for i, bloco in enumerate(blocos):
         vinculo = parse_bloco_vinculo(bloco, seq=i + 1)

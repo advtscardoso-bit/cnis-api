@@ -247,6 +247,7 @@ def pagina_dados_segurado(doc, dados):
     cabecalho = dados.get('cabecalho', {})
     idade = dados.get('idade', {})
     tempo = dados.get('tempo_contribuicao', {})
+    avisos = dados.get('avisos_beneficios', []) or []
 
     add_heading_styled(doc, 'Dados do Segurado(a)', level=1, color=COR_PRINCIPAL,
                        font_size=22, font_name='Georgia')
@@ -258,6 +259,15 @@ def pagina_dados_segurado(doc, dados):
     add_paragraph_spacing(p, before=12, after=12)
     add_run(p, cabecalho.get('nome', 'NOME NÃO IDENTIFICADO'),
             bold=True, size=18, color=COR_PRINCIPAL)
+
+    # Avisos sobre benefícios presentes no CNIS
+    for av in avisos:
+        p = doc.add_paragraph()
+        add_paragraph_spacing(p, before=6, after=2)
+        add_run(p, '⚠ ' + av.get('titulo', ''), bold=True, size=11, color=COR_LARANJA)
+        p = doc.add_paragraph()
+        add_paragraph_spacing(p, before=0, after=8)
+        add_run(p, av.get('mensagem', ''), size=10, color=COR_TEXTO_ESCURO)
 
     doc.add_paragraph()
 
