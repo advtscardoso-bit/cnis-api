@@ -246,6 +246,7 @@ def pagina_dados_segurado(doc, dados):
     """Página 4 — Dados do Segurado (dinâmica)."""
     cabecalho = dados.get('cabecalho', {})
     idade = dados.get('idade', {})
+    tempo = dados.get('tempo_contribuicao', {})
 
     add_heading_styled(doc, 'Dados do Segurado(a)', level=1, color=COR_PRINCIPAL,
                        font_size=22, font_name='Georgia')
@@ -286,6 +287,26 @@ def pagina_dados_segurado(doc, dados):
         p = cell_valor.paragraphs[0]
         add_run(p, valor, size=13, color=COR_TEXTO_ESCURO)
         set_cell_shading(cell_valor, 'FFFFFF')
+
+    # Tempo de contribuição apurado (bloco destacado)
+    if tempo and tempo.get('total_dias', 0) > 0:
+        doc.add_paragraph()
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        add_run(p, 'TEMPO DE CONTRIBUIÇÃO APURADO NO CNIS',
+                bold=True, size=11, color=COR_PRINCIPAL)
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        add_run(p, tempo.get('descricao', ''), bold=True, size=18, color=COR_PRINCIPAL)
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        add_run(
+            p,
+            'Soma dos períodos do extrato sem dupla contagem de vínculos '
+            'concomitantes. Não inclui descontos por competências bloqueadas '
+            'por pendências — esses pontos são tratados na seção de Indicadores.',
+            italic=True, size=9, color='808080',
+        )
 
     add_page_break(doc)
 
@@ -345,6 +366,48 @@ def pagina_qualidade_segurado(doc, dados):
         add_run(p, f'Foram identificados {indicadores["total_alertas"]} alerta(s) '
                 'que podem impactar a qualidade de segurado em períodos específicos.',
                 size=12)
+
+    # Tabela de períodos de manutenção e perda da QS
+    periodos_man = qualidade.get('periodos_manutencao', [])
+    if periodos_man and len(periodos_man) > 1:
+        doc.add_paragraph()
+        p = doc.add_paragraph()
+        add_paragraph_spacing(p, before=12, after=6)
+        add_run(p, 'Períodos de manutenção e perda da qualidade de segurado',
+                bold=True, size=12, color=COR_PRINCIPAL)
+        table = doc.add_table(rows=len(periodos_man) + 1, cols=4)
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        headers = ['De', 'Até', 'Duração', 'Graça aplicada']
+        for j, h in enumerate(headers):
+            cell = table.cell(0, j)
+            ph = cell.paragraphs[0]
+            ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            add_run(ph, h, bold=True, size=10, color=COR_PRINCIPAL)
+            set_cell_shading(cell, 'F5F5F5')
+        for i, per in enumerate(periodos_man, start=1):
+            for j, val in enumerate([
+                per.get('inicio', ''),
+                per.get('fim', ''),
+                f'{per.get("meses", 0)} meses',
+                f'{per.get("graca_aplicada", 0)} meses',
+            ]):
+                cell = table.cell(i, j)
+                pc = cell.paragraphs[0]
+                pc.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                add_run(pc, str(val), size=10, color=COR_TEXTO_ESCURO)
+
+        perdas = qualidade.get('perdas_historicas', [])
+        if perdas:
+            p = doc.add_paragraph()
+            add_paragraph_spacing(p, before=8)
+            add_run(p,
+                    f'Foram identificadas {len(perdas)} perda(s) histórica(s) '
+                    'de qualidade de segurado. O contador para o período de graça '
+                    'estendido (24 meses) é reiniciado a cada perda — a partir da '
+                    'última retomada de contribuições, o segurado precisa acumular '
+                    'novas 120 contribuições mensais ininterruptas para reabrir o '
+                    'direito ao período de graça maior.',
+                    italic=True, size=10, color='808080')
 
     add_page_break(doc)
 

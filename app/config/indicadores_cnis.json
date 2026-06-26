@@ -1720,6 +1720,15 @@
       "impacto": "A principal consequência deste indicador é de que, conforme art. 21, §2º da Lei 8.212/91, estas competências não contam nem como carência nem como tempo de contribuição para aposentadorias por tempo de contribuição.\nIsto porque, nos termos do art. 21, §2º, inc. II, alínea a da Lei 8.212, o MEI é uma das situações de recolhimento com alíquota reduzida, já que recolhe com alíquota de apenas 5% (e sempre sobre o salário mínimo), comparado aos 20% normais dos demais contribuinte individuais, que inclusive podem recolher em valores superiores ao mínimo.",
       "acao": "A principal consequência deste indicador é de que, conforme art. 21, §2º da Lei 8.212/91, estas competências não contam nem como carência nem como tempo de contribuição para aposentadorias por tempo de contribuição.\nIsto porque, nos termos do art. 21, §2º, inc. II, alínea a da Lei 8.212, o MEI é uma das situações de recolhimento com alíquota reduzida, já que recolhe com alíquota de apenas 5% (e sempre sobre o salário mínimo), comparado aos 20% normais dos demais contribuinte individuais, que inclusive podem recolher em valores superiores ao mínimo.",
       "fonte_analise": "TS"
+    },
+    "IREC-PROC-RFB": {
+      "nome": "Indicador de Recolhimento em Processo na Receita Federal",
+      "grupo": "CONTRIBUIÇÕES",
+      "descricao": "Indicador que sinaliza que o(s) recolhimento(s) da competência está/estão sendo objeto de algum processo na Receita Federal — parcelamento ativo, cobrança administrativa, restituição, alteração de código de receita ou execução fiscal. Não significa, por si só, que a contribuição é inválida para fins previdenciários, mas o INSS pode aguardar o desfecho do processo na RFB antes de considerar a competência integralmente para tempo de contribuição e carência.",
+      "orientacao_ts": "Quando aparece IREC-PROC-RFB, verificar no e-CAC (Receita Federal) qual é o processo vinculado àquela competência. Se for parcelamento ativo e em dia, normalmente o INSS reconhece o tempo proporcionalmente ao pago. Se for cobrança em aberto, pode ser necessário regularizar antes de requerer benefício para evitar exclusão da competência no cálculo.",
+      "impacto": "A competência marcada com IREC-PROC-RFB pode ser considerada parcialmente ou desconsiderada do tempo de contribuição enquanto o processo na Receita Federal estiver pendente — depende da natureza do processo e do desfecho.",
+      "acao": "Consultar o e-CAC com certificado digital ou senha do gov.br para identificar o processo na Receita Federal vinculado à competência. Avaliar regularização (pagamento, parcelamento) antes de requerer benefício no INSS.",
+      "fonte_analise": "TS"
     }
   },
   "ACERTOS": {

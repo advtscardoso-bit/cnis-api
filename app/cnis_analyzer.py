@@ -50,6 +50,46 @@ def carregar_salarios_minimos() -> list[dict]:
     return dados['salarios_minimos']
 
 
+def carregar_serie_inpc() -> dict:
+    """Carrega série INPC mensal (BCB SGS 188) com fatores acumulados.
+
+    Retorna {} se o arquivo não existe — correção monetária é opcional.
+    """
+    caminho = CONFIG_DIR / 'serie_inpc.json'
+    if not caminho.exists():
+        return {}
+    with open(caminho, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+
+def corrigir_valor_inpc(valor: float, competencia: str, serie_inpc: dict) -> Optional[float]:
+    """Aplica fator INPC acumulado para trazer o valor da competência à data-base.
+
+    Args:
+        valor: salário-de-contribuição nominal da competência
+        competencia: 'MM/YYYY'
+        serie_inpc: dict carregado de serie_inpc.json
+
+    Returns:
+        Valor corrigido (float) ou None se não houver fator para a competência.
+
+    Limitação: INPC isolado aproxima bem o índice oficial INSS para competências
+    a partir de 1995. Para competências pré-Real, a divergência pode ser
+    significativa porque o INSS usa índice composto (BTN/IPC/INPC).
+    """
+    if not serie_inpc or not valor or not competencia:
+        return None
+    try:
+        mes, ano = competencia.split('/')
+        chave = f'{ano}-{int(mes):02d}'
+    except (ValueError, AttributeError):
+        return None
+    fator = serie_inpc.get('fatores_correcao_para_data_base', {}).get(chave)
+    if fator is None:
+        return None
+    return round(float(valor) * float(fator), 2)
+
+
 def obter_salario_minimo(competencia: str, tabela_sm: list[dict]) -> Optional[float]:
     """Retorna o salário mínimo vigente para uma competência (MM/AAAA).
 
@@ -224,12 +264,50 @@ def calcular_lacunas(vinculos: list[dict]) -> list[dict]:
 #  VERIFICAÇÃO DE REMUNERAÇÕES VS SALÁRIO MÍNIMO
 # ============================================================================
 
-def analisar_remuneracoes(vinculos: list[dict], tabela_sm: list[dict]) -> dict:
-    """Analisa remunerações: identifica abaixo do SM, proporcionais, etc."""
+_TIPOS_RECOLHIMENTO = {
+    'Contribuinte Individual',
+    'Facultativo',
+    'Microempreendedor Individual',
+    'Segurado Especial',
+}
+
+
+def _classificar_tipo_competencia(tipo_vinculo: str) -> str:
+    """Decide se uma competência é 'Recolhimento' (CI/MEI/Facultativo/Esp.)
+    ou 'Remuneração' (CLT, Avulso, Doméstico, Agente Público)."""
+    if tipo_vinculo in _TIPOS_RECOLHIMENTO:
+        return 'Recolhimento'
+    return 'Remuneração'
+
+
+def _classificar_indicador_sc_menor_sm(competencia: str) -> str:
+    """Determina o indicador oficial INSS para SC < SM:
+       PSC-MEN-SM-EC103 → competências a partir de 11/2019 (Art. 29 EC 103/2019)
+       PREC-MENOR-MIN   → competências anteriores a 11/2019.
+    """
+    try:
+        mes, ano = competencia.split('/')
+        if (int(ano), int(mes)) >= (2019, 11):
+            return 'PSC-MEN-SM-EC103'
+    except (ValueError, AttributeError):
+        pass
+    return 'PREC-MENOR-MIN'
+
+
+def analisar_remuneracoes(vinculos: list[dict], tabela_sm: list[dict], serie_inpc: Optional[dict] = None) -> dict:
+    """Analisa remunerações: identifica abaixo do SM, proporcionais, etc.
+
+    Para cada competência abaixo do SM, classifica:
+      - `indicador_oficial`: PSC-MEN-SM-EC103 (≥ 11/2019) ou PREC-MENOR-MIN (< 11/2019)
+      - `tipo_competencia`: 'Recolhimento' (CI/MEI/Facultativo/Esp.) ou 'Remuneração' (CLT)
+      - `valor_corrigido`: valor atualizado pelo INPC até a data-base do índice
+        (omitido se a série INPC não está disponível ou se a competência é pré-Real).
+    """
     abaixo_minimo = []
     proporcionais = []
     moeda_antiga = []
     total_competencias = 0
+    serie_inpc = serie_inpc or {}
 
     for vinculo in vinculos:
         if vinculo.get('eh_beneficio'):
@@ -237,6 +315,7 @@ def analisar_remuneracoes(vinculos: list[dict], tabela_sm: list[dict]) -> dict:
 
         data_inicio = parse_data_str(vinculo.get('data_inicio', ''))
         data_fim = parse_data_str(vinculo.get('data_fim', ''))
+        tipo_competencia = _classificar_tipo_competencia(vinculo.get('tipo', ''))
 
         for rem in vinculo.get('remuneracoes', []):
             comp = rem.get('competencia')
@@ -246,6 +325,16 @@ def analisar_remuneracoes(vinculos: list[dict], tabela_sm: list[dict]) -> dict:
                 continue
 
             total_competencias += 1
+
+            # Anota tipo (Recolhimento/Remuneração) na própria remuneração
+            # para que tabelas posteriores possam exibir o tipo correto.
+            rem.setdefault('tipo_competencia', tipo_competencia)
+
+            # Anota valor corrigido pelo INPC, quando disponível.
+            if 'valor_corrigido' not in rem:
+                vc = corrigir_valor_inpc(valor, comp, serie_inpc)
+                if vc is not None:
+                    rem['valor_corrigido'] = vc
 
             # Verificar se é pré-1994 (moeda antiga)
             try:
@@ -288,6 +377,7 @@ def analisar_remuneracoes(vinculos: list[dict], tabela_sm: list[dict]) -> dict:
                         'vinculo_seq': vinculo['seq'],
                         'empregador': vinculo.get('empregador', 'N/I'),
                         'tipo': 'admissao',
+                        'tipo_competencia': tipo_competencia,
                         'dias_trabalhados': dias_trabalhados.days,
                         'nota': f'Proporcional — admissão em {vinculo.get("data_inicio", "N/I")} ({dias_trabalhados.days} dias)',
                     })
@@ -302,12 +392,13 @@ def analisar_remuneracoes(vinculos: list[dict], tabela_sm: list[dict]) -> dict:
                         'vinculo_seq': vinculo['seq'],
                         'empregador': vinculo.get('empregador', 'N/I'),
                         'tipo': 'rescisao',
+                        'tipo_competencia': tipo_competencia,
                         'dias_trabalhados': dias_trabalhados,
                         'nota': f'Proporcional — rescisão em {vinculo.get("data_fim", "N/I")} ({dias_trabalhados} dias)',
                     })
 
                 if not eh_proporcional:
-                    abaixo_minimo.append({
+                    item = {
                         'competencia': comp,
                         'valor': valor,
                         'salario_minimo': sm,
@@ -315,7 +406,20 @@ def analisar_remuneracoes(vinculos: list[dict], tabela_sm: list[dict]) -> dict:
                         'percentual': round((valor / sm) * 100, 1),
                         'vinculo_seq': vinculo['seq'],
                         'empregador': vinculo.get('empregador', 'N/I'),
-                    })
+                        'tipo_competencia': tipo_competencia,
+                        'indicador_oficial': _classificar_indicador_sc_menor_sm(comp),
+                    }
+                    vc = corrigir_valor_inpc(valor, comp, serie_inpc)
+                    if vc is not None:
+                        item['valor_corrigido'] = vc
+                        sm_corr = corrigir_valor_inpc(sm, comp, serie_inpc)
+                        if sm_corr is not None:
+                            item['salario_minimo_corrigido'] = sm_corr
+                    abaixo_minimo.append(item)
+
+    # Recortes por indicador oficial (PSC-MEN-SM-EC103 vs PREC-MENOR-MIN)
+    psc_men_sm = [x for x in abaixo_minimo if x['indicador_oficial'] == 'PSC-MEN-SM-EC103']
+    prec_menor = [x for x in abaixo_minimo if x['indicador_oficial'] == 'PREC-MENOR-MIN']
 
     return {
         'total_competencias_analisadas': total_competencias,
@@ -325,6 +429,11 @@ def analisar_remuneracoes(vinculos: list[dict], tabela_sm: list[dict]) -> dict:
         'total_abaixo_minimo': len(abaixo_minimo),
         'total_proporcionais': len(proporcionais),
         'total_moeda_antiga': len(moeda_antiga),
+        # Recortes granulares por indicador oficial INSS
+        'psc_men_sm_ec103': psc_men_sm,
+        'prec_menor_min': prec_menor,
+        'total_psc_men_sm_ec103': len(psc_men_sm),
+        'total_prec_menor_min': len(prec_menor),
     }
 
 
@@ -332,88 +441,162 @@ def analisar_remuneracoes(vinculos: list[dict], tabela_sm: list[dict]) -> dict:
 #  QUALIDADE DE SEGURADO (PERÍODO DE GRAÇA)
 # ============================================================================
 
+def _adicionar_meses(d: date, n: int) -> date:
+    """Soma n meses preservando dia 1 do mês resultante."""
+    novo_mes = d.month + n
+    novo_ano = d.year + (novo_mes - 1) // 12
+    novo_mes = ((novo_mes - 1) % 12) + 1
+    return date(novo_ano, novo_mes, 1)
+
+
+def _data_fim_graca(ultima_competencia: date, meses_graca: int) -> date:
+    """Calcula a data exata em que a qualidade de segurado deixa de ser mantida.
+
+    Regra: Art. 15 §4º da Lei 8.213/91 + Art. 14 do Decreto 3.048/99 —
+    a QS é mantida durante o período de graça (N meses contados a partir
+    do mês SEGUINTE ao da última contribuição) e ainda até o dia 15 do
+    2º mês subsequente ao término desse prazo.
+
+    Ex.: última contribuição em 12/2024, graça de 24 meses →
+         período de graça: 01/2025 a 12/2026
+         + 15 dias do 2º mês seguinte = 15/02/2027 (data limite da QS).
+    """
+    # Início do período de graça = 1º dia do mês seguinte à última contribuição
+    inicio_graca = _adicionar_meses(ultima_competencia.replace(day=1), 1)
+    # Fim do período de graça (último mês contado) = início + (graça-1) meses
+    fim_periodo = _adicionar_meses(inicio_graca, meses_graca - 1)
+    # 2º mês seguinte = fim_periodo + 2 meses
+    segundo_mes = _adicionar_meses(fim_periodo, 2)
+    return date(segundo_mes.year, segundo_mes.month, 15)
+
+
 def avaliar_qualidade_segurado(vinculos: list[dict], data_extrato: str) -> dict:
     """Avalia se o segurado mantém qualidade de segurado na data do extrato.
 
-    Regras do período de graça:
-    - CLT/Empregado: 12 meses após última contribuição
-    - CI/MEI/Facultativo com ≥120 contribuições: 24 meses
-    - +12 meses se desemprego involuntário (não verificável automaticamente)
+    Algoritmo (Art. 15 Lei 8.213/91 + Art. 14 Decreto 3.048/99):
+      1) Lista todas as competências contributivas em ordem cronológica.
+      2) Varre o histórico: para cada gap entre competências, calcula a graça
+         vigente naquele ponto (24m se já havia ≥120 contribuições ininterruptas
+         desde a última perda, senão 12m). Se o gap supera o fim da graça
+         (incluindo o +15 dias do 2º mês seguinte), marca PERDA HISTÓRICA e
+         REINICIA o contador de contribuições.
+      3) Após varrer tudo, decide a QS na data de referência com base na
+         última contribuição e nas contribuições acumuladas desde a última
+         perda histórica (ou desde o início se nunca perdeu).
+
+    Devolve também `periodos_manutencao` — lista análoga à da aba "Qualidade
+    de segurado" do Cálculo Jurídico, útil pra exibir histórico no PDF.
     """
     data_ref = parse_data_str(data_extrato) or date.today()
 
-    # Encontrar última contribuição válida
-    ultima_competencia = None
-    ultima_data = None
+    # Coletar todas as competências contributivas (mes/ano → date(ano, mes, 1))
+    competencias = []
     tipo_ultimo_vinculo = None
-    total_contribuicoes = 0
-
-    for vinculo in vinculos:
+    for vinculo in sorted(vinculos, key=lambda v: parse_data_str(v.get('data_inicio') or '') or date.min):
         if vinculo.get('eh_beneficio'):
             continue
-
         tipo_v = vinculo.get('tipo', '')
         for rem in vinculo.get('remuneracoes', []):
-            comp = rem.get('competencia')
-            if not comp:
-                continue
-
-            total_contribuicoes += 1
-
+            comp = rem.get('competencia') or ''
             try:
                 mes, ano = comp.split('/')
-                data_comp = date(int(ano), int(mes), 1)
+                d = date(int(ano), int(mes), 1)
             except (ValueError, AttributeError):
                 continue
+            competencias.append((d, comp, tipo_v))
+        # Memoriza o tipo do último vínculo cronológico
+        tipo_ultimo_vinculo = tipo_v or tipo_ultimo_vinculo
 
-            if ultima_data is None or data_comp > ultima_data:
-                ultima_data = data_comp
-                ultima_competencia = comp
-                tipo_ultimo_vinculo = tipo_v
+    competencias.sort(key=lambda x: x[0])
 
-    if not ultima_data:
+    if not competencias:
         return {
             'status': 'INDETERMINADO',
             'mensagem': 'Não foram encontradas contribuições válidas no extrato.',
             'ultima_contribuicao': None,
             'periodo_graca_meses': 0,
             'data_perda_estimada': None,
+            'periodos_manutencao': [],
+            'perdas_historicas': [],
         }
 
-    # Determinar período de graça
-    periodo_graca = PERIODO_GRACA_GERAL
+    perdas_historicas: list[dict] = []
+    periodos_manutencao: list[dict] = []
+    contribuicoes_acumuladas = 0
+    inicio_manutencao_atual = competencias[0][0]
+    ultima_comp_data = None
+    ultima_comp_str = None
 
-    # Se tem 120+ contribuições, +12 meses
-    if total_contribuicoes >= LIMIAR_CONTRIBUICOES_ININTERRUPTAS:
-        periodo_graca = PERIODO_GRACA_120_CONTRIBUICOES
+    for i, (comp_data, comp_str, _tipo) in enumerate(competencias):
+        if ultima_comp_data is None:
+            contribuicoes_acumuladas = 1
+            ultima_comp_data = comp_data
+            ultima_comp_str = comp_str
+            continue
 
-    # Calcular data estimada de perda
-    # Adicionar meses ao último mês de contribuição
-    mes_perda = ultima_data.month + periodo_graca
-    ano_perda = ultima_data.year + (mes_perda - 1) // 12
-    mes_perda = ((mes_perda - 1) % 12) + 1
-    try:
-        data_perda = date(ano_perda, mes_perda, 1)
-    except ValueError:
-        data_perda = date(ano_perda, mes_perda, 28)
+        # Graça vigente NAQUELE momento (com base nas contribuições já acumuladas)
+        graca_meses = (
+            PERIODO_GRACA_120_CONTRIBUICOES
+            if contribuicoes_acumuladas >= LIMIAR_CONTRIBUICOES_ININTERRUPTAS
+            else PERIODO_GRACA_GERAL
+        )
+        limite_qs = _data_fim_graca(ultima_comp_data, graca_meses)
 
-    # Avaliar status
-    if data_ref <= data_perda:
-        meses_restantes = (data_perda.year - data_ref.year) * 12 + (data_perda.month - data_ref.month)
+        if comp_data > limite_qs:
+            # Perda histórica de qualidade
+            perdas_historicas.append({
+                'ultima_contribuicao': ultima_comp_str,
+                'graca_meses': graca_meses,
+                'perdida_em': limite_qs.strftime('%d/%m/%Y'),
+                'retomada_em': comp_str,
+                'contribuicoes_no_periodo': contribuicoes_acumuladas,
+            })
+            periodos_manutencao.append({
+                'inicio': inicio_manutencao_atual.strftime('%d/%m/%Y'),
+                'fim': limite_qs.strftime('%d/%m/%Y'),
+                'meses': (limite_qs.year - inicio_manutencao_atual.year) * 12
+                          + (limite_qs.month - inicio_manutencao_atual.month),
+                'graca_aplicada': graca_meses,
+            })
+            inicio_manutencao_atual = comp_data
+            contribuicoes_acumuladas = 1
+        else:
+            contribuicoes_acumuladas += 1
+
+        ultima_comp_data = comp_data
+        ultima_comp_str = comp_str
+
+    # Avaliação da QS na data de referência
+    graca_atual = (
+        PERIODO_GRACA_120_CONTRIBUICOES
+        if contribuicoes_acumuladas >= LIMIAR_CONTRIBUICOES_ININTERRUPTAS
+        else PERIODO_GRACA_GERAL
+    )
+    data_perda_atual = _data_fim_graca(ultima_comp_data, graca_atual)
+    periodos_manutencao.append({
+        'inicio': inicio_manutencao_atual.strftime('%d/%m/%Y'),
+        'fim': data_perda_atual.strftime('%d/%m/%Y'),
+        'meses': (data_perda_atual.year - inicio_manutencao_atual.year) * 12
+                  + (data_perda_atual.month - inicio_manutencao_atual.month),
+        'graca_aplicada': graca_atual,
+    })
+
+    if data_ref <= data_perda_atual:
+        meses_restantes = (data_perda_atual.year - data_ref.year) * 12 + (data_perda_atual.month - data_ref.month)
         status = 'MANTIDA'
         mensagem = (
             f'O(a) segurado(a) possui qualidade de segurado. '
-            f'A última contribuição registrada foi em {ultima_competencia}. '
-            f'O período de graça de {periodo_graca} meses se estende até '
-            f'{data_perda.strftime("%m/%Y")} ({meses_restantes} meses restantes).'
+            f'A última contribuição registrada foi em {ultima_comp_str}. '
+            f'O período de graça de {graca_atual} meses se estende até '
+            f'{data_perda_atual.strftime("%d/%m/%Y")} ({meses_restantes} meses restantes).'
         )
     else:
-        anos_sem = (data_ref.year - data_perda.year)
+        anos_sem = (data_ref.year - data_perda_atual.year)
         status = 'PERDIDA'
         mensagem = (
             f'O(a) segurado(a) PERDEU a qualidade de segurado. '
-            f'A última contribuição foi em {ultima_competencia} e o período de graça '
-            f'de {periodo_graca} meses expirou em {data_perda.strftime("%m/%Y")} '
+            f'A última contribuição foi em {ultima_comp_str} e o período de graça '
+            f'de {graca_atual} meses expirou em {data_perda_atual.strftime("%d/%m/%Y")} '
             f'(há aproximadamente {anos_sem} ano(s)). Para recuperar, são necessárias '
             f'6 contribuições válidas consecutivas (50% da carência de 12 meses).'
         )
@@ -421,11 +604,14 @@ def avaliar_qualidade_segurado(vinculos: list[dict], data_extrato: str) -> dict:
     return {
         'status': status,
         'mensagem': mensagem,
-        'ultima_contribuicao': ultima_competencia,
+        'ultima_contribuicao': ultima_comp_str,
         'tipo_ultimo_vinculo': tipo_ultimo_vinculo,
-        'total_contribuicoes': total_contribuicoes,
-        'periodo_graca_meses': periodo_graca,
-        'data_perda_estimada': data_perda.strftime('%d/%m/%Y'),
+        'total_contribuicoes': sum(1 for _ in competencias),
+        'contribuicoes_desde_ultima_perda': contribuicoes_acumuladas,
+        'periodo_graca_meses': graca_atual,
+        'data_perda_estimada': data_perda_atual.strftime('%d/%m/%Y'),
+        'periodos_manutencao': periodos_manutencao,
+        'perdas_historicas': perdas_historicas,
     }
 
 
@@ -433,54 +619,78 @@ def avaliar_qualidade_segurado(vinculos: list[dict], data_extrato: str) -> dict:
 #  ESTIMATIVA DE TEMPO DE CONTRIBUIÇÃO
 # ============================================================================
 
-def estimar_tempo_contribuicao(vinculos: list[dict]) -> dict:
-    """Estima o tempo total de contribuição válido.
+def _unir_intervalos(intervalos: list[tuple[date, date]]) -> list[tuple[date, date]]:
+    """Une intervalos [inicio, fim] sobrepostos ou adjacentes (gap ≤ 1 dia).
 
-    Conta meses com remuneração para vínculos de emprego.
-    Para vínculos sem remunerações detalhadas, estima pela duração.
+    Garante que períodos concomitantes (CI sobreposto com Empregado) não sejam
+    contados em duplicidade na soma de tempo de contribuição.
     """
-    total_dias = 0
-    periodos = []
+    if not intervalos:
+        return []
+    s = sorted(intervalos, key=lambda x: x[0])
+    out = [s[0]]
+    for ini, fim in s[1:]:
+        ult_ini, ult_fim = out[-1]
+        if ini <= ult_fim or (ini - ult_fim).days <= 1:
+            out[-1] = (ult_ini, max(ult_fim, fim))
+        else:
+            out.append((ini, fim))
+    return out
 
+
+def estimar_tempo_contribuicao(vinculos: list[dict]) -> dict:
+    """Calcula o tempo total de contribuição apurado pelo CNIS.
+
+    Algoritmo:
+      1) Coleta todos os intervalos contributivos dos vínculos (exclui benefícios).
+      2) Faz UNIÃO dos intervalos — períodos concomitantes (empregado + CI ao
+         mesmo tempo) entram uma vez só.
+      3) Soma a duração em dias de cada intervalo unido.
+      4) Converte total em anos/meses/dias (365/30 dias por ano/mês).
+
+    Esse é o tempo BRUTO apurado pelo extrato. NÃO desconta competências
+    bloqueadas por indicadores (PSC-MEN-SM, PREC-MENOR-MIN, PREM-FVIN etc.) —
+    isso fica para a próxima etapa quando implementarmos a verificação por
+    competência.
+    """
+    intervalos: list[tuple[date, date]] = []
+    periodos_raw = []
+
+    hoje = date.today()
     for vinculo in vinculos:
         if vinculo.get('eh_beneficio'):
             continue
 
         data_inicio = parse_data_str(vinculo.get('data_inicio', ''))
-        data_fim = parse_data_str(vinculo.get('data_fim', ''))
+        data_fim = parse_data_str(vinculo.get('data_fim', '')) or hoje
+        if not data_inicio or data_fim < data_inicio:
+            continue
 
-        if data_inicio and data_fim:
-            dias = (data_fim - data_inicio).days + 1  # Inclui o dia
-            if dias > 0:
-                total_dias += dias
-                periodos.append({
-                    'vinculo_seq': vinculo['seq'],
-                    'empregador': vinculo.get('empregador', 'N/I'),
-                    'inicio': vinculo['data_inicio'],
-                    'fim': vinculo['data_fim'],
-                    'dias': dias,
-                    'meses': round(dias / 30, 1),
-                })
-        elif data_inicio and not data_fim:
-            # Vínculo ativo (sem data fim) — conta até hoje
-            hoje = date.today()
-            dias = (hoje - data_inicio).days + 1
-            if dias > 0:
-                total_dias += dias
-                periodos.append({
-                    'vinculo_seq': vinculo['seq'],
-                    'empregador': vinculo.get('empregador', 'N/I'),
-                    'inicio': vinculo['data_inicio'],
-                    'fim': 'Em aberto (ativo)',
-                    'dias': dias,
-                    'meses': round(dias / 30, 1),
-                })
+        intervalos.append((data_inicio, data_fim))
+        periodos_raw.append({
+            'vinculo_seq': vinculo['seq'],
+            'empregador': vinculo.get('empregador', 'N/I'),
+            'inicio': vinculo.get('data_inicio'),
+            'fim': vinculo.get('data_fim') or 'Em aberto (ativo)',
+            'dias': (data_fim - data_inicio).days + 1,
+        })
 
-    # Converter total para anos, meses e dias
+    unidos = _unir_intervalos(intervalos)
+    total_dias = sum((fim - ini).days + 1 for ini, fim in unidos)
+
     anos = total_dias // 365
     resto = total_dias % 365
     meses = resto // 30
     dias = resto % 30
+
+    intervalos_unidos = [
+        {
+            'inicio': ini.strftime('%d/%m/%Y'),
+            'fim': fim.strftime('%d/%m/%Y'),
+            'dias': (fim - ini).days + 1,
+        }
+        for ini, fim in unidos
+    ]
 
     return {
         'total_dias': total_dias,
@@ -488,11 +698,15 @@ def estimar_tempo_contribuicao(vinculos: list[dict]) -> dict:
         'meses': meses,
         'dias': dias,
         'descricao': f'{anos} ano(s), {meses} mês(es) e {dias} dia(s)',
-        'periodos': periodos,
+        'periodos': periodos_raw,
+        'intervalos_unidos': intervalos_unidos,
+        'total_intervalos_unidos': len(unidos),
         'nota': (
-            'Estimativa baseada nas datas de início e fim dos vínculos. '
-            'Períodos concomitantes (dois empregos simultâneos) podem estar contados em duplicidade. '
-            'A contagem oficial é feita pelo INSS considerando apenas contribuições válidas.'
+            'Tempo bruto apurado pela união dos intervalos dos vínculos do '
+            'extrato, sem dupla contagem de períodos concomitantes. NÃO inclui '
+            'descontos por competências bloqueadas por pendências (PSC-MEN-SM, '
+            'PREC-MENOR-MIN, PREM-FVIN, etc.). A contagem oficial pelo INSS '
+            'considera apenas contribuições válidas.'
         ),
     }
 
@@ -659,45 +873,84 @@ def _conclusao_pendencias(pendencias: list[dict], vinculos: list[dict]) -> Optio
     }
 
 
+def _agrupar_por_empregador(itens: list[dict]) -> list[dict]:
+    """Agrupa lista de competências por empregador, mostrando até 10 competências
+    e o valor médio nominal/corrigido (INPC) das competências do grupo."""
+    por_emp = {}
+    for it in itens:
+        emp = it.get('empregador', 'N/I')
+        por_emp.setdefault(emp, []).append(it)
+    out = []
+    for emp, lista in por_emp.items():
+        comps = ', '.join(i['competencia'] for i in lista[:10])
+        if len(lista) > 10:
+            comps += f' e mais {len(lista) - 10}'
+        tipos = sorted({i.get('tipo_competencia', '') for i in lista if i.get('tipo_competencia')})
+        valores = [i.get('valor') for i in lista if i.get('valor') is not None]
+        valores_corr = [i.get('valor_corrigido') for i in lista if i.get('valor_corrigido') is not None]
+        media_nominal = round(sum(valores) / len(valores), 2) if valores else None
+        media_corr = round(sum(valores_corr) / len(valores_corr), 2) if valores_corr else None
+        out.append({
+            'empregador': emp,
+            'qtd': len(lista),
+            'competencias': comps,
+            'tipo_competencia': ' / '.join(tipos) if tipos else '',
+            'valor_medio_nominal': media_nominal,
+            'valor_medio_corrigido': media_corr,
+        })
+    return out
+
+
 def _conclusao_abaixo_minimo(abaixo_minimo: list[dict]) -> Optional[dict]:
     """Gera problema de salários abaixo do mínimo.
 
-    Retorna estrutura com frase curta + `tabela_abaixo_minimo` para
-    o template renderizar a quebra por empregador como tabela legível.
+    Separa em dois blocos conforme o indicador oficial INSS:
+      - PSC-MEN-SM-EC103: competências a partir de 11/2019 (passíveis de
+        complementação via Art. 29 EC 103, procedimento normatizado no Meu INSS).
+      - PREC-MENOR-MIN: competências anteriores a 11/2019 (tratamento caso a caso).
+
+    Cada item também traz `tipo_competencia` ('Recolhimento' ou 'Remuneração')
+    pra distinguir contribuição de CI/MEI/Facultativo (Recolhimento) vs CLT
+    (Remuneração).
     """
     if not abaixo_minimo:
         return None
 
-    por_empregador = {}
-    for item in abaixo_minimo:
-        emp = item.get('empregador', 'N/I')
-        if emp not in por_empregador:
-            por_empregador[emp] = []
-        por_empregador[emp].append(item)
-
-    tabela = []
-    for emp, itens in por_empregador.items():
-        comps = ', '.join([i['competencia'] for i in itens[:10]])
-        if len(itens) > 10:
-            comps += f' e mais {len(itens) - 10}'
-        tabela.append({
-            'empregador': emp,
-            'qtd': len(itens),
-            'competencias': comps,
-        })
+    psc = [x for x in abaixo_minimo if x.get('indicador_oficial') == 'PSC-MEN-SM-EC103']
+    prec = [x for x in abaixo_minimo if x.get('indicador_oficial') == 'PREC-MENOR-MIN']
 
     return {
         'problema': (
-            f'Foram identificadas {len(abaixo_minimo)} competência(s) com remuneração '
-            f'abaixo do salário mínimo vigente na época.'
+            f'Foram identificadas {len(abaixo_minimo)} competência(s) com salário de '
+            f'contribuição abaixo do mínimo vigente na época, classificadas em dois '
+            f'indicadores oficiais do INSS conforme a data.'
         ),
-        'tabela_abaixo_minimo': tabela,
+        # Mantém chave legada pra retrocompatibilidade do template
+        'tabela_abaixo_minimo': _agrupar_por_empregador(abaixo_minimo),
+        # Recortes novos
+        'tabela_psc_men_sm_ec103': _agrupar_por_empregador(psc),
+        'tabela_prec_menor_min': _agrupar_por_empregador(prec),
+        'total_psc_men_sm_ec103': len(psc),
+        'total_prec_menor_min': len(prec),
         'impacto': (
             'Contribuições abaixo do salário mínimo NÃO contam para carência e NÃO são '
             'computadas no tempo de contribuição. O(a) segurado(a) pode estar com menos '
             'tempo de contribuição do que imagina, o que pode atrasar significativamente '
             'a data da aposentadoria ou resultar em um benefício com valor menor do que '
             'teria direito.'
+        ),
+        'acao_psc_men_sm_ec103': (
+            'Para competências PSC-MEN-SM-EC103 (a partir de 11/2019): solicitar os '
+            'Ajustes do Art. 29 da EC 103/2019 (complementação, utilização ou '
+            'agrupamento) via canal de atendimento remoto do Meu INSS. Após processamento '
+            'do DARF de complementação, o indicador é removido e a competência passa a '
+            'contar normalmente para carência e tempo de contribuição.'
+        ),
+        'acao_prec_menor_min': (
+            'Para competências PREC-MENOR-MIN (anteriores a 11/2019): a regularização '
+            'depende de análise jurídica caso a caso — pode envolver recolhimento '
+            'complementar com base na jurisprudência aplicável. Recomenda-se avaliação '
+            'previdenciária específica antes de iniciar o procedimento.'
         ),
     }
 
@@ -983,6 +1236,7 @@ def analisar_cnis(dados_parser: dict) -> dict:
     # Carregar configurações
     dicionario_indicadores = carregar_indicadores()
     tabela_sm = carregar_salarios_minimos()
+    serie_inpc = carregar_serie_inpc()
 
     # 1. Classificar todos os indicadores
     todos_indicadores = set()
@@ -1005,7 +1259,7 @@ def analisar_cnis(dados_parser: dict) -> dict:
     lacunas = calcular_lacunas(vinculos)
 
     # 3. Analisar remunerações
-    analise_remuneracoes = analisar_remuneracoes(vinculos, tabela_sm)
+    analise_remuneracoes = analisar_remuneracoes(vinculos, tabela_sm, serie_inpc)
 
     # 4. Qualidade de segurado
     qualidade = avaliar_qualidade_segurado(vinculos, cabecalho.get('data_emissao', ''))
