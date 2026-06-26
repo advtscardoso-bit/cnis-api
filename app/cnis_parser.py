@@ -183,33 +183,60 @@ def parse_competencia(texto_comp: str) -> Optional[str]:
 def extrair_indicadores_linha(linha: str) -> list[str]:
     """Extrai códigos de indicadores de uma linha de texto.
 
-    Indicadores reais do CNIS sempre contêm hífen (ex: IREC-LC123,
-    PREC-MENOR-MIN, PEXT, IEAN) ou são códigos curtos conhecidos.
+    Reconhece:
+      1) Códigos com hífen e/ou underscore (regex genérica) — pega a maioria
+         (ex.: IREC-LC123, PREC-MENOR-MIN, PSC-MEN-SM-EC103, PREC-COD1821_FORA_VIG).
+      2) Códigos curtos sem hífen mapeados explicitamente no allowlist
+         (ex.: GFIP, IDT, ILEI123, IMEI, IRECOL, ISALMIN, NDET, PEXT, IEAN, PRPPS).
+      3) Códigos com cedilha (IVIN-DESLIG-JUSTIÇA-TRAB) — checados literalmente
+         antes de aplicar a regex genérica para evitar fragmentação.
+
     Palavras simples em maiúsculas (BANCO, TURISMO, LTDA) NÃO são indicadores.
     """
-    # Indicadores conhecidos sem hífen (exceções)
+    # Allowlist de códigos curtos sem hífen — registry tem entradas como
+    # IRECOL, GFIP, IMEI, ILEI123 que a regex de hífen sozinha não captura.
     indicadores_sem_hifen = {
-        'PEXT', 'IEAN', 'PRPPS',
-        'AVRC-DEF', 'AEXT-VT', 'ACNISVR',
+        # Originais
+        'PEXT', 'IEAN', 'PRPPS', 'PRPSE', 'AVRC-DEF', 'AEXT-VT', 'ACNISVR',
+        # Curtos sem hífen do registry
+        'GFIP', 'IDT', 'ILEI123', 'IMEI', 'IRECOL', 'ISALMIN', 'NDET',
     }
 
-    # Regex: só captura palavras que contêm pelo menos um hífen
-    # Ex: IREC-LC123, PREC-MENOR-MIN, PADM-EMPR, PSC-MEN-SM-EC103
-    re_indicador_hifen = re.compile(r'([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+)')
+    # Códigos com caractere especial (Ç) que precisariam de regex ampliada.
+    # Tratamos por presença literal antes da regex pra evitar fragmentação
+    # no caractere não-ASCII.
+    indicadores_especiais = [
+        'IVIN-DESLIG-JUSTIÇA-TRAB',
+        'IVIN-DESLIG-JUSTICA-TRAB',  # variante sem cedilha (alguns extratos)
+        'PVIN-DESLIG-JUSTIÇA-TRAB',
+        'PVIN-DESLIG-JUSTICA-TRAB',  # variante sem cedilha
+    ]
 
-    matches = re_indicador_hifen.findall(linha)
-    indicadores = []
+    indicadores: list[str] = []
+    linha_resto = linha
 
-    for m in matches:
-        indicadores.append(m)
+    # Passo 1: códigos especiais (consome do texto pra evitar fragmentos)
+    for cod in indicadores_especiais:
+        if cod in linha_resto:
+            indicadores.append(cod)
+            # Mascara mantendo comprimento, evita reordenar índices
+            linha_resto = linha_resto.replace(cod, ' ' * len(cod))
 
-    # Também verificar indicadores conhecidos sem hífen
-    palavras = re.findall(r'\b([A-Z]{3,})\b', linha)
-    for p in palavras:
-        if p in indicadores_sem_hifen:
-            indicadores.append(p)
+    # Passo 2: regex genérica (com hífen e/ou underscore)
+    re_indicador_hifen = re.compile(r'([A-Z][A-Z0-9_]*(?:-[A-Z0-9_]+)+)')
+    indicadores.extend(re_indicador_hifen.findall(linha_resto))
 
-    return list(set(indicadores))  # Deduplica
+    # Passo 3: códigos curtos sem hífen — busca literal com boundary natural
+    # (não admite continuação alfanumérica), pega itens como ILEI123 (com dígitos).
+    for cod in indicadores_sem_hifen:
+        if re.search(r'(?<![A-Z0-9])' + re.escape(cod) + r'(?![A-Z0-9])', linha):
+            indicadores.append(cod)
+
+    # Variantes do tipo "PREC-FBR (FBR-AUT-*)" — a regex já pega PREC-FBR e
+    # FBR-AUT-* separadamente, então ambas as marcas ficam disponíveis para
+    # o classifier. Não precisa de tratamento adicional.
+
+    return list(set(indicadores))
 
 
 def identificar_tipo_vinculo(texto_bloco: str) -> str:
