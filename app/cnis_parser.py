@@ -146,6 +146,45 @@ def reconectar_indicadores_quebrados(texto: str) -> str:
             and len(baixo.strip()) < 80  # evita juntar parágrafos longos
         )
 
+        # Caso B: indicador quebrado pertence à linha ANTERIOR (não à do meio).
+        # Padrão observado no CNIS da Maria (PSC-MEN-SM-EC103 da v8 12/2025):
+        #
+        #     L_N-1 : 11/2025 3.036,00  12/2025 3.036,00            ← comp pai
+        #     L_N   : PSC-MEN-SM-                                   ← topo (1 frag)
+        #     L_N+1 : 01/2026 3.242,00  02/2026 3.242,00  05/2026 ...  ← OUTRA fila
+        #     L_N+2 : EC103                                         ← fim (1 frag)
+        #
+        # Critério: atual é um fragmento (não tem comp), N+1 tem comp, N+2 é
+        # outro fragmento curto e N-1 tem competências. Cole o indicador
+        # reconstruído na ÚLTIMA competência da linha N-1.
+        atual_tokens = atual.strip().split()
+        baixo2 = linhas[i + 2].strip() if i + 2 < len(linhas) else ''
+        baixo2_tokens = baixo2.split()
+        if (not eh_comp
+                and atual.rstrip().endswith('-')
+                # topo tem APENAS 1 token (1 coluna), senão é caso A multi-col
+                and len(atual_tokens) == 1
+                and i + 2 < len(linhas)
+                and RE_TEM_COMP.search(linhas[i + 1])
+                and not RE_TEM_COMP.search(baixo2)
+                # baixo tem 1 token só (continuação de 1 coluna)
+                and len(baixo2_tokens) == 1
+                and RE_INDICADOR_FIM.match(baixo2)
+                and len(baixo2) < 40
+                and out
+                and RE_TEM_COMP.search(out[-1] or '')):
+            # Reconstrói indicador completo
+            indicador = (atual.rstrip() + linhas[i + 2].strip()).strip()
+            # Cola na ÚLTIMA competência da linha anterior (out[-1])
+            out[-1] = out[-1].rstrip() + ' ' + indicador
+            # Esvazia o baixo na lista de entrada pra ele ser ignorado quando
+            # chegarmos lá.
+            linhas[i + 2] = ''
+            # Pula o topo (atual). A linha do meio (i+1) é deixada intacta
+            # para parsing normal.
+            i += 1
+            continue
+
         if eh_comp and topo_eh_fragmento and baixo_eh_fragmento:
             # Distribui topo/baixo entre os pares (comp+valor) da linha atual.
             # CNIS multi-coluna costuma trazer N fragmentos topo + N pares

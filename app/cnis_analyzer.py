@@ -1390,6 +1390,13 @@ def analisar_cnis(dados_parser: dict) -> dict:
     serie_inpc = carregar_serie_inpc()
 
     # 1. Classificar todos os indicadores
+    # Indicadores cujo escopo é SÓ vínculo de empregado (CJ filtra esses).
+    # IREM-* (Indicador de REMuneração) faz sentido só onde existe
+    # remuneração CLT — para Contribuinte Individual o equivalente é
+    # IREC-INDPEND (Indicador de REColhimento).
+    _IND_SOMENTE_EMPREGADO = {'IREM-INDPEND', 'IREM-ACD'}
+    _TIPOS_EMPREGADO = {'Empregado', 'Empregado Doméstico', 'Agente Público', 'Trabalhador Avulso'}
+
     todos_indicadores = set()
     contagem_ocorrencias: dict[str, int] = {}
     contagem_vinculos_distintos: dict[str, set] = {}
@@ -1398,11 +1405,18 @@ def analisar_cnis(dados_parser: dict) -> dict:
         if v.get('eh_beneficio'):
             continue
         seq = v.get('seq')
-        inds_neste_vinculo = set(v.get('indicadores_vinculo', []))
+        tipo_v = v.get('tipo', '')
+        eh_empregado = tipo_v in _TIPOS_EMPREGADO
+        inds_neste_vinculo = set()
         for ind in v.get('indicadores_vinculo', []):
+            if ind in _IND_SOMENTE_EMPREGADO and not eh_empregado:
+                continue
+            inds_neste_vinculo.add(ind)
             contagem_ocorrencias[ind] = contagem_ocorrencias.get(ind, 0) + 1
         for r in v.get('remuneracoes', []):
             for ind in r.get('indicadores', []):
+                if ind in _IND_SOMENTE_EMPREGADO and not eh_empregado:
+                    continue
                 contagem_ocorrencias[ind] = contagem_ocorrencias.get(ind, 0) + 1
                 inds_neste_vinculo.add(ind)
         for ind in inds_neste_vinculo:
