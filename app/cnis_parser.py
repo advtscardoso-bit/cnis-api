@@ -103,6 +103,98 @@ def limpar_texto(texto: str) -> str:
     return texto.strip()
 
 
+RE_INDICADOR_PARCIAL = re.compile(r'^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\s*$')
+RE_INDICADOR_FIM = re.compile(r'^(?:[A-Z]+,?\s+)?[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*')
+RE_TEM_COMP = re.compile(r'\b\d{2}/\d{4}\b')
+
+
+def reconectar_indicadores_quebrados(texto: str) -> str:
+    """Reconecta indicadores que o extrator de PDF quebrou entre 2 linhas.
+
+    Padrão observado no CNIS do Beltrão:
+
+        Linha N-1: "PREM-VINC-PROC-  PREM-VINC-PROC-"     ← topo  do indicador
+        Linha N  : "02/2011 6.394,55  06/2011 6.394,55"   ← competências
+        Linha N+1: "TRAB, PREM-FVIN  TRAB, PREM-FVIN"     ← fim do indicador
+
+    O extrator (pdfplumber ou PyMuPDF) lê em 3 linhas separadas e o parser
+    acaba sem os indicadores PREM-VINC-PROC-TRAB e PREM-FVIN nas
+    competências 02/2011 e 06/2011. Esta função:
+
+      - Detecta linhas vizinhas que parecem "metades" de indicador
+        (linha terminando em '-' ou linha começando com fragmento de código).
+      - Junta o topo e o fim ao redor da linha de competências.
+    """
+    linhas = texto.split('\n')
+    out = []
+    i = 0
+    while i < len(linhas):
+        atual = linhas[i]
+        # Caso 1: linha de competência ladeada por fragmento acima E abaixo
+        eh_comp = bool(RE_TEM_COMP.search(atual))
+        topo = linhas[i - 1] if i > 0 else ''
+        baixo = linhas[i + 1] if i + 1 < len(linhas) else ''
+
+        topo_eh_fragmento = (
+            topo.rstrip().endswith('-')
+            and not RE_TEM_COMP.search(topo)
+        )
+        baixo_eh_fragmento = (
+            bool(baixo.strip())
+            and not RE_TEM_COMP.search(baixo)
+            and RE_INDICADOR_FIM.match(baixo.strip())
+            and len(baixo.strip()) < 80  # evita juntar parágrafos longos
+        )
+
+        if eh_comp and topo_eh_fragmento and baixo_eh_fragmento:
+            # Distribui topo/baixo entre os pares (comp+valor) da linha atual.
+            # CNIS multi-coluna costuma trazer N fragmentos topo + N pares
+            # comp+valor + N fragmentos baixo (um por coluna). Concatenamos
+            # fragmento_topo[k] + fragmento_baixo[k] como o indicador da
+            # coluna k, e o intercalamos após o par k.
+            partes_topo = topo.strip().split()
+            partes_baixo = baixo.strip().split()
+            # Quantos pares de competência+valor na linha atual?
+            pares = list(re.finditer(
+                r'\d{2}/\d{4}\s+[\d]{1,3}(?:\.[\d]{3})*,[\d]{2}',
+                atual,
+            ))
+            n_pares = len(pares)
+            # Só reconecta quando topo e baixo têm número de tokens MÚLTIPLO
+            # de n_pares (uma "coluna" tem o mesmo número de tokens em cada
+            # linha do bloco topo/baixo). Senão, o indicador pode pertencer a
+            # outra linha e contaminaríamos a atual.
+            tokens_topo_ok = n_pares > 0 and partes_topo and len(partes_topo) % n_pares == 0
+            tokens_baixo_ok = n_pares > 0 and partes_baixo and len(partes_baixo) % n_pares == 0
+            if tokens_topo_ok and tokens_baixo_ok:
+                ch_topo = len(partes_topo) // n_pares
+                ch_baixo = len(partes_baixo) // n_pares
+                topo_partes = [' '.join(partes_topo[k*ch_topo:(k+1)*ch_topo]) for k in range(n_pares)]
+                baixo_partes = [' '.join(partes_baixo[k*ch_baixo:(k+1)*ch_baixo]) for k in range(n_pares)]
+                # Junta cada par com seu indicador correspondente
+                novo = ''
+                cursor = 0
+                for k, mp in enumerate(pares):
+                    novo += atual[cursor:mp.end()]
+                    ind = (topo_partes[k] + baixo_partes[k]).strip()
+                    if ind:
+                        novo += ' ' + ind
+                    cursor = mp.end()
+                novo += atual[cursor:]
+                atual = novo
+                if out:
+                    out[-1] = ''
+                out.append(atual)
+                i += 2
+                continue
+            # senão: não tem certeza pra qual coluna pertence — deixa como está
+
+        out.append(atual)
+        i += 1
+
+    return '\n'.join(l for l in out if l)
+
+
 def parse_cabecalho(texto_completo: str) -> dict:
     """Extrai dados cadastrais do cabeçalho do CNIS."""
     cabecalho = {
@@ -513,6 +605,8 @@ def parse_cnis(pdf_path: str) -> dict:
 
     texto_completo = '\n'.join(paginas)
     texto_limpo = limpar_texto(texto_completo)
+    # Reconecta indicadores quebrados entre linhas vizinhas pelo extrator de PDF
+    texto_limpo = reconectar_indicadores_quebrados(texto_limpo)
 
     # 2. Extrair cabeçalho
     cabecalho = parse_cabecalho(texto_limpo)

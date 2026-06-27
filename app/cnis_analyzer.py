@@ -1391,14 +1391,37 @@ def analisar_cnis(dados_parser: dict) -> dict:
 
     # 1. Classificar todos os indicadores
     todos_indicadores = set()
+    contagem_ocorrencias: dict[str, int] = {}
+    contagem_vinculos_distintos: dict[str, set] = {}
+
     for v in vinculos:
-        todos_indicadores.update(v.get('indicadores_vinculo', []))
+        if v.get('eh_beneficio'):
+            continue
+        seq = v.get('seq')
+        inds_neste_vinculo = set(v.get('indicadores_vinculo', []))
+        for ind in v.get('indicadores_vinculo', []):
+            contagem_ocorrencias[ind] = contagem_ocorrencias.get(ind, 0) + 1
         for r in v.get('remuneracoes', []):
-            todos_indicadores.update(r.get('indicadores', []))
+            for ind in r.get('indicadores', []):
+                contagem_ocorrencias[ind] = contagem_ocorrencias.get(ind, 0) + 1
+                inds_neste_vinculo.add(ind)
+        for ind in inds_neste_vinculo:
+            contagem_vinculos_distintos.setdefault(ind, set()).add(seq)
+        todos_indicadores.update(inds_neste_vinculo)
 
     indicadores_classificados = classificar_indicadores(
         list(todos_indicadores), dicionario_indicadores
     )
+    # Anota cada indicador com contagem de ocorrências e de vínculos distintos.
+    # Para indicadores de competência (PREM-*, IREM-ACD, PSC-*, PREC-*) a
+    # `total_ocorrencias` é a métrica relevante; para indicadores de vínculo
+    # (IREM-INDPEND, IREC-INDPEND, IVIN-*, PVIN-*, PRPPS, PEXT, PADM-*,
+    # AVRC-*, AEXT-*, IEAN) a `total_vinculos` é o que o Cálculo Jurídico
+    # exibe na aba "Períodos com Indicadores".
+    for item in indicadores_classificados:
+        cod = item['codigo']
+        item['total_ocorrencias'] = contagem_ocorrencias.get(cod, 0)
+        item['total_vinculos'] = len(contagem_vinculos_distintos.get(cod, set()))
 
     # Separar por tipo
     pendencias = [i for i in indicadores_classificados if i['tipo'] == 'PENDENCIA']
