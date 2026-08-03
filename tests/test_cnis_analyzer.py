@@ -425,6 +425,80 @@ class TestEstimarTempoContribuicao:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# TESTES — tempo LÍQUIDO (descontos por indicadores)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestTempoLiquido:
+
+    def test_sem_indicadores_liquido_igual_bruto(self):
+        vinculos = [_vinculo(1, data_inicio="01/01/2020", data_fim="31/12/2020")]
+        resultado = estimar_tempo_contribuicao(vinculos)
+        liq = resultado['liquido']
+        assert liq['meses_descontados'] == 0
+        assert liq['total_dias'] == resultado['total_dias']
+        assert liq['diferenca_descricao'] == 'Sem descontos aplicados'
+
+    def test_g1_desconta_competencias_bloqueadas(self):
+        # 12 meses no total, 3 competências com PSC-MEN-SM-EC103 (G1)
+        rems = [
+            {'competencia': f'{m:02d}/2020', 'valor': 500.0,
+             'indicadores': ['PSC-MEN-SM-EC103'] if m in (3, 4, 5) else []}
+            for m in range(1, 13)
+        ]
+        vinculos = [_vinculo(1, data_inicio="01/01/2020", data_fim="31/12/2020",
+                             remuneracoes=rems)]
+        resultado = estimar_tempo_contribuicao(vinculos)
+        liq = resultado['liquido']
+        assert liq['descontos_por_grupo']['G1']['meses'] == 3
+        assert 'PSC-MEN-SM-EC103' in liq['descontos_por_grupo']['G1']['indicadores']
+        assert liq['meses_descontados'] == 3
+
+    def test_g2_mei_nao_conta_para_tempo(self):
+        rems = [
+            {'competencia': f'{m:02d}/2020', 'valor': 55.0,
+             'indicadores': ['IREC-MEI']}
+            for m in range(1, 13)
+        ]
+        vinculos = [_vinculo(1, tipo='Contribuinte Individual',
+                             data_inicio="01/01/2020", data_fim="31/12/2020",
+                             remuneracoes=rems)]
+        resultado = estimar_tempo_contribuicao(vinculos)
+        liq = resultado['liquido']
+        assert liq['descontos_por_grupo']['G2']['meses'] == 12
+        assert liq['meses_descontados'] == 12
+        assert liq['total_dias'] < resultado['total_dias']
+
+    def test_g3_vinculo_inteiro_bloqueado_por_ndet(self):
+        vinculos = [_vinculo(1, data_inicio="01/01/2020", data_fim="31/12/2020",
+                             indicadores_vinculo=['NDET'])]
+        resultado = estimar_tempo_contribuicao(vinculos)
+        liq = resultado['liquido']
+        assert liq['descontos_por_grupo']['G3']['meses'] == 12
+        assert liq['meses_descontados'] == 12
+        assert 'NDET' in liq['descontos_por_grupo']['G3']['indicadores']
+
+    def test_cobertura_valida_em_outro_vinculo_nao_desconta(self):
+        # Vínculo 1 bloqueado por NDET; vínculo 2 válido no mesmo período.
+        # O mês NÃO deve ser descontado porque há cobertura válida.
+        vinculos = [
+            _vinculo(1, empregador="EMP A", data_inicio="01/01/2020",
+                     data_fim="31/12/2020", indicadores_vinculo=['NDET']),
+            _vinculo(2, empregador="EMP B", data_inicio="01/01/2020",
+                     data_fim="31/12/2020"),
+        ]
+        resultado = estimar_tempo_contribuicao(vinculos)
+        liq = resultado['liquido']
+        assert liq['meses_descontados'] == 0
+
+    def test_beneficio_nao_conta_para_liquido(self):
+        vinculos = [_vinculo(1, data_inicio="01/01/2020", data_fim="31/12/2020",
+                             eh_beneficio=True)]
+        resultado = estimar_tempo_contribuicao(vinculos)
+        assert resultado['liquido']['meses_descontados'] == 0
+        assert resultado['liquido']['total_dias'] == 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # TESTES — verificar_sobreposicoes
 # ═══════════════════════════════════════════════════════════════════════════
 

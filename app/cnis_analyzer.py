@@ -29,6 +29,47 @@ from config.constantes_cnis import (
 
 
 # ============================================================================
+#  INDICADORES QUE BLOQUEIAM TEMPO DE CONTRIBUIÇÃO
+#  (decisão jurídica — Dra. Tatiana Sampaio, 2026-08-03)
+# ============================================================================
+
+# G1 competência-level — competência inválida para todos os fins.
+INDICADORES_TEMPO_G1_COMPETENCIA = frozenset({
+    'PSC-MEN-SM-EC103',
+    'PREC-MENOR-MIN',
+    'PREM-BLOQ-EC103',
+    'PREC-OBITO',
+    'PREM-OBITO',
+    'IREC-PROC-RFB',
+})
+
+# G1 vínculo-level — vínculo com data admissão/desligamento pós-óbito
+# (todas as competências do vínculo saem).
+INDICADORES_TEMPO_G1_VINCULO = frozenset({
+    'PVIN-ADM-OBITO',
+    'PVIN-DESLIG-OBITO',
+})
+
+# G2 competência-level — não conta para tempo de contribuição
+# (mas conta para idade/carência). Art. 21 §2º Lei 8.212/91.
+INDICADORES_TEMPO_G2_COMPETENCIA = frozenset({
+    'ILEI123', 'IRECOL (ILEI123)',
+    'IMEI', 'IRECOL (IMEI)', 'IREC-MEI',
+    'IREC-FBR', 'PREC-FBR',
+    'FBR-AUT-CONCQSA', 'FBR-AUT-DUPGRUPFAM', 'FBR-AUT-EXPCAD',
+    'FBR-AUT-OBITO', 'FBR-AUT-PENDCAD', 'FBR-AUT-RENPES',
+    'IREC-LC123-SUP',
+})
+
+# G3 vínculo-level — vínculo problemático (todas as competências saem).
+INDICADORES_TEMPO_G3_VINCULO = frozenset({
+    'PVIN-CAGED', 'PVIN-ME', 'PVIN-AGRUP-INC',
+    'AEXT-VI', 'NDET',
+    'PSE-NEG', 'PSE-PEN',
+})
+
+
+# ============================================================================
 #  CARREGAMENTO DE CONFIGURAÇÕES
 # ============================================================================
 
@@ -830,6 +871,8 @@ def estimar_tempo_contribuicao(vinculos: list[dict]) -> dict:
         for ini, fim in unidos
     ]
 
+    liquido = _calcular_tempo_liquido(vinculos, total_dias)
+
     return {
         'total_dias': total_dias,
         'anos': anos,
@@ -845,6 +888,173 @@ def estimar_tempo_contribuicao(vinculos: list[dict]) -> dict:
             'descontos por competências bloqueadas por pendências (PSC-MEN-SM, '
             'PREC-MENOR-MIN, PREM-FVIN, etc.). A contagem oficial pelo INSS '
             'considera apenas contribuições válidas.'
+        ),
+        'liquido': liquido,
+    }
+
+
+def _proximo_mes(mes: int, ano: int) -> tuple[int, int]:
+    if mes == 12:
+        return 1, ano + 1
+    return mes + 1, ano
+
+
+def _meses_no_intervalo(inicio: date, fim: date):
+    """Itera (mes, ano) para cada mês tocado por [inicio, fim]."""
+    mes, ano = inicio.month, inicio.year
+    fim_mes, fim_ano = fim.month, fim.year
+    while (ano, mes) <= (fim_ano, fim_mes):
+        yield mes, ano
+        mes, ano = _proximo_mes(mes, ano)
+
+
+def _calcular_tempo_liquido(vinculos: list[dict], total_dias_bruto: int) -> dict:
+    """Calcula o tempo LÍQUIDO descontando meses bloqueados por indicadores.
+
+    Descontos aplicados (aprovados pela Dra. em 2026-08-03):
+      - G1: competência inválida para todos os fins (SC<SM, óbito, RFB) ou
+            vínculo com data admissão/desligamento pós-óbito
+      - G2: não conta para tempo de contribuição (MEI/LC123/FBR)
+      - G3: vínculo problemático (CAGED, mandato eletivo, seg. especial não
+            ratificado, extemporâneo indeferido, etc.)
+
+    Um mês só é descontado se TODOS os vínculos que o cobrem tiverem algum
+    indicador bloqueador — se houver ao menos uma cobertura válida, o mês
+    permanece no cômputo (usa-se ela).
+    """
+    hoje = date.today()
+    cobertura: dict[tuple[int, int], list[tuple[int, Optional[tuple[str, str]]]]] = {}
+
+    for vinculo in vinculos:
+        if vinculo.get('eh_beneficio'):
+            continue
+        inicio = parse_data_str(vinculo.get('data_inicio', ''))
+        fim = parse_data_str(vinculo.get('data_fim', '')) or hoje
+        if not inicio or fim < inicio:
+            continue
+
+        inds_v = set(vinculo.get('indicadores_vinculo', []) or [])
+        bloqueio_g1v = inds_v & INDICADORES_TEMPO_G1_VINCULO
+        bloqueio_g3 = inds_v & INDICADORES_TEMPO_G3_VINCULO
+        if bloqueio_g1v:
+            motivo_vinculo: Optional[tuple[str, str]] = ('G1', sorted(bloqueio_g1v)[0])
+        elif bloqueio_g3:
+            motivo_vinculo = ('G3', sorted(bloqueio_g3)[0])
+        else:
+            motivo_vinculo = None
+
+        rem_por_comp: dict[tuple[int, int], set[str]] = {}
+        for rem in vinculo.get('remuneracoes', []) or []:
+            comp = rem.get('competencia')
+            if not comp:
+                continue
+            try:
+                m_str, a_str = comp.split('/')
+                key = (int(m_str), int(a_str))
+            except (ValueError, IndexError):
+                continue
+            rem_por_comp[key] = set(rem.get('indicadores', []) or [])
+
+        for mes, ano in _meses_no_intervalo(inicio, fim):
+            key = (mes, ano)
+            if motivo_vinculo is not None:
+                motivo = motivo_vinculo
+            else:
+                inds_r = rem_por_comp.get(key, set())
+                bloq_g1c = inds_r & INDICADORES_TEMPO_G1_COMPETENCIA
+                bloq_g2c = inds_r & INDICADORES_TEMPO_G2_COMPETENCIA
+                if bloq_g1c:
+                    motivo = ('G1', sorted(bloq_g1c)[0])
+                elif bloq_g2c:
+                    motivo = ('G2', sorted(bloq_g2c)[0])
+                else:
+                    motivo = None
+            cobertura.setdefault(key, []).append((vinculo['seq'], motivo))
+
+    total_meses_bruto = len(cobertura)
+    meses_descontados_por_grupo = {'G1': 0, 'G2': 0, 'G3': 0}
+    codigos_por_grupo: dict[str, set[str]] = {'G1': set(), 'G2': set(), 'G3': set()}
+    meses_validos = 0
+
+    for coberturas in cobertura.values():
+        motivos = [m for (_, m) in coberturas if m is not None]
+        tem_cobertura_valida = len(motivos) < len(coberturas)
+        if tem_cobertura_valida:
+            meses_validos += 1
+            continue
+
+        # Todas as coberturas bloqueadas — escolher pior grupo (G1 > G2 > G3
+        # em impacto jurídico, mas para contabilidade damos preferência ao
+        # primeiro grupo encontrado na ordem G1, G2, G3).
+        grupos_presentes = {g for (g, _) in motivos}
+        for g in ('G1', 'G2', 'G3'):
+            if g in grupos_presentes:
+                meses_descontados_por_grupo[g] += 1
+                for gg, cod in motivos:
+                    if gg == g:
+                        codigos_por_grupo[g].add(cod)
+                break
+
+    meses_descontados = sum(meses_descontados_por_grupo.values())
+    dias_descontados = meses_descontados * 30
+    dias_liquido = max(0, total_dias_bruto - dias_descontados)
+
+    anos_l = dias_liquido // 365
+    resto_l = dias_liquido % 365
+    meses_l = resto_l // 30
+    dias_l = resto_l % 30
+
+    if meses_descontados:
+        diff_anos = meses_descontados // 12
+        diff_meses = meses_descontados % 12
+        if diff_anos and diff_meses:
+            diff_desc = f'{diff_anos} ano(s) e {diff_meses} mês(es) descontados'
+        elif diff_anos:
+            diff_desc = f'{diff_anos} ano(s) descontados'
+        else:
+            diff_desc = f'{diff_meses} mês(es) descontados'
+    else:
+        diff_desc = 'Sem descontos aplicados'
+
+    return {
+        'total_dias': dias_liquido,
+        'anos': anos_l,
+        'meses': meses_l,
+        'dias': dias_l,
+        'descricao': f'{anos_l} ano(s), {meses_l} mês(es) e {dias_l} dia(s)',
+        'total_meses_bruto': total_meses_bruto,
+        'meses_descontados': meses_descontados,
+        'diferenca_descricao': diff_desc,
+        'descontos_por_grupo': {
+            'G1': {
+                'meses': meses_descontados_por_grupo['G1'],
+                'indicadores': sorted(codigos_por_grupo['G1']),
+                'descricao': (
+                    'Competência inválida para todos os fins '
+                    '(SC<SM, óbito, processo RFB, data pós-óbito).'
+                ),
+            },
+            'G2': {
+                'meses': meses_descontados_por_grupo['G2'],
+                'indicadores': sorted(codigos_por_grupo['G2']),
+                'descricao': (
+                    'Não conta para tempo de contribuição, mas conta para '
+                    'idade/carência (MEI/LC123/FBR — Art. 21 §2º Lei 8.212/91).'
+                ),
+            },
+            'G3': {
+                'meses': meses_descontados_por_grupo['G3'],
+                'indicadores': sorted(codigos_por_grupo['G3']),
+                'descricao': (
+                    'Vínculo problemático (CAGED, mandato eletivo, seg. '
+                    'especial não ratificado, extemporâneo indeferido, etc.).'
+                ),
+            },
+        },
+        'nota': (
+            'Tempo líquido = tempo bruto − meses bloqueados por indicadores '
+            'CNIS. Um mês só é descontado quando TODOS os vínculos que o '
+            'cobrem estão bloqueados. Cálculo aproximado em meses (30 dias/mês).'
         ),
     }
 

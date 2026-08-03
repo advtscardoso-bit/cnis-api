@@ -305,16 +305,72 @@ def pagina_dados_segurado(doc, dados):
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         add_run(p, 'TEMPO DE CONTRIBUIÇÃO APURADO NO CNIS',
                 bold=True, size=11, color=COR_PRINCIPAL)
-        p = doc.add_paragraph()
+
+        liquido = tempo.get('liquido')
+        tem_liquido = bool(liquido)
+        cols = 2 if tem_liquido else 1
+        table_tempo = doc.add_table(rows=2, cols=cols)
+        table_tempo.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+        cell_lbl_bruto = table_tempo.cell(0, 0)
+        p = cell_lbl_bruto.paragraphs[0]
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        add_run(p, tempo.get('descricao', ''), bold=True, size=18, color=COR_PRINCIPAL)
+        add_run(p, 'TEMPO BRUTO (APÓS OS AJUSTES)', bold=True, size=9, color='718096')
+        cell_val_bruto = table_tempo.cell(1, 0)
+        p = cell_val_bruto.paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        add_run(p, tempo.get('descricao', ''), bold=True, size=16, color=COR_PRINCIPAL)
+
+        if tem_liquido:
+            cell_lbl_liq = table_tempo.cell(0, 1)
+            p = cell_lbl_liq.paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            add_run(p, 'TEMPO LÍQUIDO (ANTES DOS AJUSTES)', bold=True, size=9,
+                    color='718096')
+            cell_val_liq = table_tempo.cell(1, 1)
+            p = cell_val_liq.paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            cor_liq = 'C05621' if liquido.get('meses_descontados', 0) > 0 else COR_PRINCIPAL
+            add_run(p, liquido.get('descricao', ''), bold=True, size=16, color=cor_liq)
+            p = cell_val_liq.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            add_run(p, liquido.get('diferenca_descricao', ''),
+                    italic=True, size=9, color='808080')
+
+        # Detalhamento dos descontos por grupo, se houver.
+        if tem_liquido and liquido.get('meses_descontados', 0) > 0:
+            grupos = liquido.get('descontos_por_grupo', {})
+            labels = {
+                'G1': 'G1 — competência inválida',
+                'G2': 'G2 — não conta para tempo (idade/carência ok)',
+                'G3': 'G3 — vínculo problemático',
+            }
+            p = doc.add_paragraph()
+            add_paragraph_spacing(p, before=8, after=2)
+            add_run(p, 'Descontos aplicados:', bold=True, size=10, color=COR_LARANJA)
+            for g in ('G1', 'G2', 'G3'):
+                info = grupos.get(g, {})
+                if info.get('meses', 0) <= 0:
+                    continue
+                p = doc.add_paragraph()
+                add_paragraph_spacing(p, before=0, after=2)
+                add_run(p, f"• {labels[g]}: ", bold=True, size=9, color=COR_TEXTO_ESCURO)
+                add_run(
+                    p,
+                    f"{info['meses']} mês(es) — {', '.join(info.get('indicadores', []))}",
+                    size=9, color=COR_TEXTO_ESCURO,
+                )
+
         p = doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         add_run(
             p,
-            'Soma dos períodos do extrato sem dupla contagem de vínculos '
-            'concomitantes. Não inclui descontos por competências bloqueadas '
-            'por pendências — esses pontos são tratados na seção de Indicadores.',
+            'Tempo bruto = potencial total (soma dos períodos do extrato sem '
+            'dupla contagem, assumindo todas as pendências regularizadas). '
+            'Tempo líquido = o que o INSS conta hoje, antes de qualquer '
+            'ajuste; é o bruto menos os meses bloqueados por indicadores '
+            'CNIS (detalhados na seção de Indicadores). Regularizando esses '
+            'bloqueios, o líquido tende ao bruto.',
             italic=True, size=9, color='808080',
         )
 
