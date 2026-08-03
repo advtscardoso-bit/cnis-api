@@ -55,6 +55,22 @@ RE_VALOR_MONETARIO = re.compile(r'([\d]{1,3}(?:\.[\d]{3})*,[\d]{2})')
 # Indicadores
 RE_INDICADOR = re.compile(r'([A-Z][A-Z0-9]{1,}(?:-[A-Z0-9]+)*)')
 
+# Linha de benefício INSS (formato do CNIS recente):
+# "SEQ NIT NB Benefício NN - NOME DA ESPECIE DIB [DCB] STATUS_CODE - STATUS"
+# Exemplo real: "14 102.61149.62-5 1716072910 Benefício 41 - APOSENTADORIA POR IDADE 22/04/2015 0 - ATIVO"
+RE_BENEFICIO_LINHA = re.compile(
+    r'(\d{1,3})\s+'
+    r'(\d{3}\.?\d{5}\.?\d{2}-?\d)\s+'
+    r'(\d{10})\s+'
+    r'Benef[ií]cio\s+(\d{2,3})\s*-\s*'
+    r'([A-ZÁÀÂÃÉÈÊÍÏÓÔÕÖÚÇÑ][A-ZÁÀÂÃÉÈÊÍÏÓÔÕÖÚÇÑ\s/\.]+?)\s+'
+    r'(\d{2}/\d{2}/\d{4})'
+    r'(?:\s+(\d{2}/\d{2}/\d{4}))?\s+'
+    r'(\d{1,3})\s*-\s*'
+    r'([A-ZÁÉÍÓÚÊÔÇ]+)',
+    re.IGNORECASE
+)
+
 # Tipos de vínculo/filiação
 # ORDEM IMPORTA: chaves mais específicas primeiro para evitar match parcial.
 # Ex: "EMPREGADO DOMÉSTICO" antes de "EMPREGADO", "SEGURADO ESPECIAL" antes de "CI".
@@ -408,6 +424,28 @@ def parse_bloco_vinculo(bloco_texto: str, seq: int) -> dict:
 
     linhas = bloco_texto.split('\n')
 
+    # 1) Tentar linha completa de benefício ANTES da heurística genérica.
+    # A linha de benefício traz seq+NIT+NB+espécie+DIB+[DCB]+status na mesma
+    # linha, então extraímos tudo de uma vez e evitamos que a heurística
+    # genérica (datas/empregador) capture ruído de rodapé de página.
+    m_ben_linha = RE_BENEFICIO_LINHA.search(bloco_texto)
+    if m_ben_linha:
+        vinculo['eh_beneficio'] = True
+        vinculo['numero_beneficio'] = m_ben_linha.group(3)
+        vinculo['especie_beneficio'] = (
+            f"{m_ben_linha.group(4)} - {m_ben_linha.group(5).strip()}"
+        )
+        vinculo['data_inicio'] = m_ben_linha.group(6)
+        vinculo['data_fim'] = m_ben_linha.group(7)  # None se ATIVO
+        vinculo['situacao_beneficio'] = m_ben_linha.group(9).strip().upper()
+        vinculo['empregador'] = f"INSS - {vinculo['especie_beneficio']}"
+        # Indicadores do vínculo (raramente aparecem em benefício, mas OK)
+        for linha in linhas[:5]:
+            inds = extrair_indicadores_linha(linha)
+            vinculo['indicadores_vinculo'].extend(inds)
+        vinculo['indicadores_vinculo'] = list(set(vinculo['indicadores_vinculo']))
+        return vinculo
+
     # Buscar CNPJ ou CEI
     m_cnpj = RE_CNPJ.search(bloco_texto)
     m_cei = RE_CEI.search(bloco_texto)
@@ -423,10 +461,10 @@ def parse_bloco_vinculo(bloco_texto: str, seq: int) -> dict:
     if len(datas) >= 2:
         vinculo['data_fim'] = datas[1]
 
-    # Verificar se é benefício. O texto extraído pode conter:
-    #   1) "NB <10 dígitos>" — formato clássico
-    #   2) "Benefício <espécie> - <descrição> <status> - <STATUS>" — formato
-    #      compactado nas linhas de benefício do CNIS recente, sem rótulo NB.
+    # 2) Fallback: detectar benefício por formatos legados/atípicos.
+    #    1) "NB <10 dígitos>" — formato clássico com rótulo NB explícito.
+    #    2) "Benefício <espécie> - <descrição> <status> - <STATUS>" sem DIB
+    #       entre nome e status (formato antigo).
     m_nb = re.search(r'NB[:\s]*(\d{10})', bloco_texto)
     m_ben = re.search(
         r'Benef[ií]cio\s+(\d{2})\s*-\s*([A-ZÁÀÂÃÉÈÊÍÏÓÔÕÖÚÇÑ\s/]+?)\s+(\d{1,3})\s*-\s*([A-ZÁÉÍÓÚÊÔÇ]+)',

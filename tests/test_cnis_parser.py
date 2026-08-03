@@ -79,6 +79,16 @@ ATIVO
 01/03/2020 30/09/2020
 """
 
+# Formato do CNIS recente (uma linha só, sem rótulo "NB:"), como no CNIS da
+# Maria de Lourdes. Padrão: SEQ NIT NB Benefício NN - NOME DIB [DCB] STATUS_CODE - STATUS
+BLOCO_BENEFICIO_LINHA_UNICA_ATIVO = """
+14 102.61149.62-5 1716072910 Benefício 41 - APOSENTADORIA POR IDADE 22/04/2015 0 - ATIVO
+"""
+
+BLOCO_BENEFICIO_LINHA_UNICA_CESSADO = """
+5 111.22233.44-5 9998887770 Benefício 31 - AUXILIO DOENCA 15/06/2018 30/09/2019 2 - CESSADO
+"""
+
 TEXTO_SEGMENTACAO = """
 Relações Previdenciárias
 1 123.45678.90-1 EMPREGADO
@@ -397,6 +407,29 @@ class TestParseBlocoVinculo:
         assert v['numero_beneficio'] == '1234567890'
         assert 'AUXILIO DOENCA' in v['especie_beneficio']
         assert v['situacao_beneficio'] == 'ATIVO'
+
+    def test_beneficio_linha_unica_ativo_maria(self):
+        # Regressão: CNIS recente traz benefício numa linha só, sem rótulo
+        # "NB:", com DIB entre nome da espécie e código de situação.
+        # Antes da correção, este bloco saía com eh_beneficio=False.
+        v = parse_bloco_vinculo(BLOCO_BENEFICIO_LINHA_UNICA_ATIVO, seq=14)
+        assert v['eh_beneficio'] is True
+        assert v['numero_beneficio'] == '1716072910'
+        assert v['especie_beneficio'] == '41 - APOSENTADORIA POR IDADE'
+        assert v['data_inicio'] == '22/04/2015'
+        assert v['data_fim'] is None  # ATIVO — sem DCB
+        assert v['situacao_beneficio'] == 'ATIVO'
+        assert v['empregador'].startswith('INSS')
+
+    def test_beneficio_linha_unica_cessado(self):
+        # Formato com DCB: SEQ NIT NB Benefício NN - NOME DIB DCB CODE - CESSADO
+        v = parse_bloco_vinculo(BLOCO_BENEFICIO_LINHA_UNICA_CESSADO, seq=5)
+        assert v['eh_beneficio'] is True
+        assert v['numero_beneficio'] == '9998887770'
+        assert '31' in v['especie_beneficio']
+        assert v['data_inicio'] == '15/06/2018'
+        assert v['data_fim'] == '30/09/2019'
+        assert v['situacao_beneficio'] == 'CESSADO'
 
     def test_empregador_extraido(self):
         v = parse_bloco_vinculo(BLOCO_VINCULO_CLT, seq=1)

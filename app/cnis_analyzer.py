@@ -10,6 +10,7 @@ Recebe dados estruturados do parser e aplica regras de análise:
 
 import json
 import os
+import re
 import sys
 from datetime import datetime, date, timedelta
 from decimal import Decimal
@@ -749,17 +750,62 @@ def _unir_intervalos(intervalos: list[tuple[date, date]]) -> list[tuple[date, da
     return out
 
 
+# Códigos de espécie do INSS (subset relevante para avisos)
+_ESPECIES_APOSENTADORIA = {
+    '32': 'Aposentadoria por Invalidez',
+    '41': 'Aposentadoria por Idade',
+    '42': 'Aposentadoria por Tempo de Contribuição',
+    '43': 'Aposentadoria por Tempo de Serviço do Professor',
+    '46': 'Aposentadoria Especial',
+    '57': 'Aposentadoria da Pessoa com Deficiência',
+    '78': 'Aposentadoria por Idade da Pessoa com Deficiência',
+    '92': 'Aposentadoria por Invalidez Acidentária',
+}
+_ESPECIES_AUXILIO_INCAPACIDADE = {
+    '31': 'Auxílio-Doença (Incapacidade Temporária)',
+    '91': 'Auxílio-Doença Acidentário',
+}
+
+
+def _classificar_especie(especie: str) -> tuple[str, str]:
+    """Retorna (categoria, nome_amigavel) a partir da string de espécie.
+
+    Categorias: 'APOSENTADORIA', 'PENSAO_MORTE', 'AUXILIO_INCAPACIDADE',
+                'AUXILIO_ACIDENTE', 'BPC_LOAS', 'OUTRO'.
+    """
+    e = (especie or '').upper().strip()
+    # Extrai código numérico (primeiros dígitos)
+    m = re.match(r'(\d{2,3})', e)
+    codigo = m.group(1) if m else ''
+
+    if codigo in _ESPECIES_APOSENTADORIA or 'APOSENTADORIA' in e:
+        nome = _ESPECIES_APOSENTADORIA.get(codigo)
+        if not nome:
+            nome = 'Aposentadoria'
+        return 'APOSENTADORIA', nome
+    if codigo == '21' or 'PENSAO POR MORTE' in e or 'PENSÃO POR MORTE' in e:
+        return 'PENSAO_MORTE', 'Pensão por Morte'
+    if codigo in _ESPECIES_AUXILIO_INCAPACIDADE or 'AUXILIO DOEN' in e or 'AUXÍLIO DOEN' in e or 'INCAPACIDADE TEMPOR' in e:
+        nome = _ESPECIES_AUXILIO_INCAPACIDADE.get(codigo, 'Auxílio por Incapacidade Temporária')
+        return 'AUXILIO_INCAPACIDADE', nome
+    if codigo == '36' or 'AUXILIO ACIDENTE' in e or 'AUXÍLIO ACIDENTE' in e:
+        return 'AUXILIO_ACIDENTE', 'Auxílio-Acidente'
+    if codigo in ('87', '88') or 'BPC' in e or 'LOAS' in e or 'ASSISTENCIAL' in e or 'ASSISTENCIAL' in e:
+        return 'BPC_LOAS', 'BPC/LOAS'
+    return 'OUTRO', especie or 'benefício não identificado'
+
+
 def detectar_avisos_beneficios(vinculos: list[dict]) -> list[dict]:
-    """Sprint 2: gera avisos no topo do PDF para benefícios presentes no CNIS.
+    """Gera avisos no topo do PDF para benefícios presentes no CNIS.
 
     Padrões reconhecidos:
-      - Pensão por morte (espécie 21) → benefício de dependente, não deve
-        contar no cálculo de outro benefício próprio do segurado.
-      - Aposentadoria por Tempo de Contribuição (espécie 42) — se ATIVA,
-        indica que o segurado já está aposentado; se INDEFERIDA, registra
-        tentativa recente.
-      - Auxílio-Doença (espécie 31) INDEFERIDO — sinaliza problema
-        pendente em incapacidade temporária.
+      - Qualquer APOSENTADORIA (32/41/42/43/46/57/78/92): ATIVA gera
+        info "cliente já aposentado"; INDEFERIDA gera aviso de recurso;
+        CESSADA gera info histórico.
+      - PENSÃO POR MORTE (21) → benefício de dependente, alerta.
+      - AUXÍLIO-DOENÇA (31/91) INDEFERIDO → alerta pra recurso.
+      - AUXÍLIO-ACIDENTE (36) ATIVO → info.
+      - BPC/LOAS (87/88) → info sempre presente.
     """
     avisos = []
     for v in vinculos:
@@ -768,8 +814,61 @@ def detectar_avisos_beneficios(vinculos: list[dict]) -> list[dict]:
         especie = (v.get('especie_beneficio') or '').upper()
         situacao = (v.get('situacao_beneficio') or '').upper()
         nb = v.get('numero_beneficio') or 'N/I'
+        dib = v.get('data_inicio') or 'data não informada'
+        categoria, nome_amigavel = _classificar_especie(especie)
 
-        if 'PENSAO POR MORTE' in especie or especie.startswith('21'):
+        if categoria == 'APOSENTADORIA':
+            if 'ATIVO' in situacao:
+                avisos.append({
+                    'tipo': 'APOSENTADORIA_ATIVA',
+                    'severidade': 'INFO',
+                    'titulo': f'{nome_amigavel} ATIVA no CNIS: cliente já aposentado(a).',
+                    'mensagem': (
+                        f'O(a) segurado(a) já recebe {nome_amigavel} (NB {nb}, '
+                        f'DIB {dib}). Para análise de novo benefício, verificar regras '
+                        'de acumulação e/ou desaposentação aplicáveis.'
+                    ),
+                })
+                avisos.append({
+                    'tipo': 'LIMITE_ANALISE_APOSENTADO',
+                    'severidade': 'AVISO',
+                    'titulo': 'Limitação desta análise em casos de aposentadoria em manutenção.',
+                    'mensagem': (
+                        'Nesta análise de CNIS não conseguimos verificar se todos os '
+                        'documentos apresentados no pedido de aposentadoria '
+                        '(PPP, LTCAT, tempo especial, prova rural, sentenças, laudos '
+                        'periciais, CTC de outros regimes, entre outros) foram '
+                        'efetivamente analisados e computados pelo INSS ao conceder o '
+                        'benefício. Divergências entre o que o(a) segurado(a) apresentou '
+                        'e o que o INSS considerou são causa frequente de aposentadorias '
+                        'concedidas com valor abaixo do devido. Para diagnóstico completo, '
+                        'é preciso examinar o processo administrativo integral (carta de '
+                        'concessão e documentos anexados) e comparar com o cálculo '
+                        'utilizado pelo INSS.'
+                    ),
+                })
+            elif 'INDEFERIDO' in situacao:
+                avisos.append({
+                    'tipo': 'APOSENTADORIA_INDEFERIDA',
+                    'severidade': 'AVISO',
+                    'titulo': f'Pedido de {nome_amigavel} INDEFERIDO no CNIS.',
+                    'mensagem': (
+                        f'Há um pedido de {nome_amigavel} INDEFERIDO (NB {nb}, '
+                        f'DIB {dib}). Avaliar motivos do indeferimento e cabimento de '
+                        'recurso administrativo ou novo requerimento.'
+                    ),
+                })
+            elif 'CESSADO' in situacao:
+                avisos.append({
+                    'tipo': 'APOSENTADORIA_CESSADA',
+                    'severidade': 'INFO',
+                    'titulo': f'{nome_amigavel} CESSADA no CNIS (histórico).',
+                    'mensagem': (
+                        f'Registro histórico de {nome_amigavel} (NB {nb}, DIB {dib}) '
+                        'atualmente cessada. Verificar motivo da cessação.'
+                    ),
+                })
+        elif categoria == 'PENSAO_MORTE':
             avisos.append({
                 'tipo': 'PENSAO_POR_MORTE',
                 'severidade': 'AVISO',
@@ -777,43 +876,53 @@ def detectar_avisos_beneficios(vinculos: list[dict]) -> list[dict]:
                 'mensagem': (
                     'A pensão por morte é benefício de dependente — não deve ser '
                     f'considerada no cálculo de outro benefício do(a) próprio(a) segurado(a). '
-                    f'NB {nb}, situação {situacao or "não informada"}.'
+                    f'NB {nb}, DIB {dib}, situação {situacao or "não informada"}.'
                 ),
             })
-        elif 'TEMPO DE CONTRIBU' in especie or especie.startswith('42'):
-            if 'ATIVO' in situacao:
-                avisos.append({
-                    'tipo': 'APOSENTADORIA_ATIVA',
-                    'severidade': 'INFO',
-                    'titulo': 'Aposentadoria por Tempo de Contribuição ATIVA no CNIS.',
-                    'mensagem': (
-                        f'O(a) segurado(a) já está recebendo Aposentadoria por Tempo '
-                        f'de Contribuição (NB {nb}). Para análise de outro benefício, '
-                        'verificar regras de acumulação aplicáveis.'
-                    ),
-                })
-            elif 'INDEFERIDO' in situacao:
-                avisos.append({
-                    'tipo': 'APOSENTADORIA_INDEFERIDA',
-                    'severidade': 'AVISO',
-                    'titulo': 'Pedido de Aposentadoria por Tempo de Contribuição INDEFERIDO.',
-                    'mensagem': (
-                        f'Há um pedido de aposentadoria por tempo de contribuição '
-                        f'INDEFERIDO no CNIS (NB {nb}). Avaliar motivos do indeferimento '
-                        'e cabimento de recurso administrativo ou novo requerimento.'
-                    ),
-                })
-        elif 'AUXILIO DOENCA' in especie or especie.startswith('31'):
+        elif categoria == 'AUXILIO_INCAPACIDADE':
             if 'INDEFERIDO' in situacao:
                 avisos.append({
                     'tipo': 'AUXILIO_DOENCA_INDEFERIDO',
                     'severidade': 'AVISO',
-                    'titulo': 'Pedido de Auxílio-Doença INDEFERIDO no CNIS.',
+                    'titulo': f'Pedido de {nome_amigavel} INDEFERIDO no CNIS.',
                     'mensagem': (
-                        f'Há um pedido de auxílio-doença INDEFERIDO (NB {nb}). '
-                        'Avaliar histórico médico e cabimento de recurso ou novo pedido.'
+                        f'Há um pedido de {nome_amigavel} INDEFERIDO (NB {nb}, '
+                        f'DIB {dib}). Avaliar histórico médico e cabimento de recurso '
+                        'ou novo pedido.'
                     ),
                 })
+            elif 'ATIVO' in situacao:
+                avisos.append({
+                    'tipo': 'AUXILIO_DOENCA_ATIVO',
+                    'severidade': 'INFO',
+                    'titulo': f'{nome_amigavel} ATIVO no CNIS.',
+                    'mensagem': (
+                        f'O(a) segurado(a) recebe {nome_amigavel} (NB {nb}, DIB {dib}). '
+                        'Confirmar CID e prognóstico com o cliente.'
+                    ),
+                })
+        elif categoria == 'AUXILIO_ACIDENTE':
+            if 'ATIVO' in situacao:
+                avisos.append({
+                    'tipo': 'AUXILIO_ACIDENTE_ATIVO',
+                    'severidade': 'INFO',
+                    'titulo': 'Auxílio-Acidente ATIVO no CNIS.',
+                    'mensagem': (
+                        f'O(a) segurado(a) recebe Auxílio-Acidente (NB {nb}, DIB {dib}). '
+                        'Benefício vitalício, acumulável com aposentadoria concedida até 10/11/1997.'
+                    ),
+                })
+        elif categoria == 'BPC_LOAS':
+            avisos.append({
+                'tipo': 'BPC_LOAS_PRESENTE',
+                'severidade': 'INFO',
+                'titulo': 'BPC/LOAS presente no CNIS.',
+                'mensagem': (
+                    f'O(a) segurado(a) recebe/recebeu BPC/LOAS (NB {nb}, DIB {dib}, '
+                    f'situação {situacao or "não informada"}). Verificar critérios de '
+                    'renda per capita e deficiência/idade.'
+                ),
+            })
     return avisos
 
 

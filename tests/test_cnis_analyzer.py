@@ -27,6 +27,8 @@ from cnis_analyzer import (
     parse_data_str,
     carregar_indicadores,
     carregar_salarios_minimos,
+    detectar_avisos_beneficios,
+    _classificar_especie,
 )
 
 
@@ -496,6 +498,87 @@ class TestTempoLiquido:
         resultado = estimar_tempo_contribuicao(vinculos)
         assert resultado['liquido']['meses_descontados'] == 0
         assert resultado['liquido']['total_dias'] == 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TESTES — _classificar_especie + detectar_avisos_beneficios
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestClassificarEspecie:
+    def test_aposentadoria_idade_41(self):
+        cat, nome = _classificar_especie('41 - APOSENTADORIA POR IDADE')
+        assert cat == 'APOSENTADORIA'
+        assert 'Idade' in nome
+
+    def test_aposentadoria_tempo_42(self):
+        cat, nome = _classificar_especie('42 - APOSENTADORIA POR TEMPO DE CONTRIBUICAO')
+        assert cat == 'APOSENTADORIA'
+        assert 'Tempo' in nome
+
+    def test_aposentadoria_invalidez_32(self):
+        cat, nome = _classificar_especie('32 - APOSENTADORIA POR INVALIDEZ')
+        assert cat == 'APOSENTADORIA'
+
+    def test_pensao_morte_21(self):
+        cat, nome = _classificar_especie('21 - PENSAO POR MORTE')
+        assert cat == 'PENSAO_MORTE'
+
+    def test_auxilio_doenca_31(self):
+        cat, nome = _classificar_especie('31 - AUXILIO DOENCA')
+        assert cat == 'AUXILIO_INCAPACIDADE'
+
+    def test_bpc_87(self):
+        cat, nome = _classificar_especie('87 - BPC LOAS')
+        assert cat == 'BPC_LOAS'
+
+    def test_desconhecido(self):
+        cat, nome = _classificar_especie('99 - INEXISTENTE')
+        assert cat == 'OUTRO'
+
+
+class TestDetectarAvisosBeneficios:
+    def _beneficio(self, especie, situacao='ATIVO', nb='1234567890', dib='01/01/2020'):
+        return {
+            'seq': 1, 'tipo': 'Benefício', 'empregador': f'INSS - {especie}',
+            'identificador_empregador': None, 'data_inicio': dib, 'data_fim': None,
+            'ultima_remuneracao': None, 'indicadores_vinculo': [],
+            'remuneracoes': [], 'eh_beneficio': True, 'numero_beneficio': nb,
+            'especie_beneficio': especie, 'situacao_beneficio': situacao,
+        }
+
+    def test_aposentadoria_idade_ativa_gera_dois_avisos(self):
+        # Bug do CNIS da Maria: espécie 41 não estava gerando aviso.
+        # Aposentadoria ATIVA agora gera 2 avisos: o de status + o de
+        # limite da análise (docs do pedido não vistos pelo relatório).
+        avisos = detectar_avisos_beneficios([self._beneficio('41 - APOSENTADORIA POR IDADE')])
+        tipos = [a['tipo'] for a in avisos]
+        assert 'APOSENTADORIA_ATIVA' in tipos
+        assert 'LIMITE_ANALISE_APOSENTADO' in tipos
+        limite = next(a for a in avisos if a['tipo'] == 'LIMITE_ANALISE_APOSENTADO')
+        assert 'documentos' in limite['mensagem'].lower()
+        assert 'PPP' in limite['mensagem'] or 'LTCAT' in limite['mensagem']
+
+    def test_aposentadoria_tempo_indeferida(self):
+        avisos = detectar_avisos_beneficios([
+            self._beneficio('42 - APOSENTADORIA POR TEMPO DE CONTRIBUICAO', situacao='INDEFERIDO')
+        ])
+        assert len(avisos) == 1
+        assert avisos[0]['tipo'] == 'APOSENTADORIA_INDEFERIDA'
+
+    def test_pensao_morte_sempre_gera_aviso(self):
+        avisos = detectar_avisos_beneficios([self._beneficio('21 - PENSAO POR MORTE')])
+        assert len(avisos) == 1
+        assert avisos[0]['tipo'] == 'PENSAO_POR_MORTE'
+
+    def test_ignora_vinculo_nao_beneficio(self):
+        v = self._beneficio('41')
+        v['eh_beneficio'] = False
+        assert detectar_avisos_beneficios([v]) == []
+
+    def test_bpc_gera_info(self):
+        avisos = detectar_avisos_beneficios([self._beneficio('87 - BPC LOAS')])
+        assert len(avisos) == 1
+        assert avisos[0]['tipo'] == 'BPC_LOAS_PRESENTE'
 
 
 # ═══════════════════════════════════════════════════════════════════════════
